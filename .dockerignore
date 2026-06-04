@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+*.zip
+*.log
+__pycache__
+*.pyc
+.git
+.gitignore
+ssl/
+*.md
+serverwatch.db
+serverwatch-agent.log

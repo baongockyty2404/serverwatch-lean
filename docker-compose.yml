@@ -1,0 +1,104 @@
+# ═══════════════════════════════════════════════════════════════
+# ServerWatch (lean v2) — Docker Compose Stack
+# Chỉ còn 2 container: server (API + dashboard) + agent-local
+# External nginx (web-proxy network) handle SSL + proxy thẳng vào server:8000
+# ═══════════════════════════════════════════════════════════════
+
+services:
+
+  # ════════════════════════════════════════
+  # ServerWatch API + Dashboard
+  # FastAPI serve dashboard.html + /api + /ws trực tiếp
+  # ════════════════════════════════════════
+  server:
+    build:
+      context: .
+      target: server
+    container_name: sw-server
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${SERVER_PORT:-8800}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./backup:/app/backup
+      - ./dashboard.html:/app/dashboard.html:ro
+    environment:
+      SECRET_TOKEN: ${SECRET_TOKEN:-changeme}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@serverwatch.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_EXPIRE_HOURS: ${JWT_EXPIRE_HOURS:-24}
+      METRICS_RETENTION_HOURS: ${METRICS_RETENTION_HOURS:-48}
+      BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-19}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      HEARTBEAT_SECRET: ${HEARTBEAT_SECRET:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://monitor.example.com}
+      TZ: Asia/Ho_Chi_Minh
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - sw_net
+      - web-proxy
+    mem_limit: 256m
+    cpus: 1
+
+  # ════════════════════════════════════════
+  # Agent Local — giám sát chính host này
+  # ════════════════════════════════════════
+  agent-local:
+    build:
+      context: .
+      target: agent
+    container_name: sw-agent-local
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log/host:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc:/host/etc:ro
+      - /usr/bin:/host/usr/bin:ro
+      - /bin:/host/bin:ro
+      - /var/lib/dpkg:/host/var/lib/dpkg:ro
+      - /root/.ssh:/host/root/.ssh:ro
+      - sw_agent_state:/var/lib/serverwatch
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      HOST_ROOT: /host
+    network_mode: host
+    command: >
+      python agent.py
+        --server http://127.0.0.1:${SERVER_PORT:-8800}
+        --token ${SECRET_TOKEN:-changeme}
+        --interval 30
+    pid: host
+    privileged: false
+    security_opt:
+      - no-new-privileges:true
+    cap_add:
+      - SYS_PTRACE
+    cap_drop:
+      - ALL
+    mem_limit: 128m
+    cpus: 0.5
+    profiles:
+      - agent-local
+
+# ── Volumes ──────────────────────────────────────────────────
+volumes:
+  sw_agent_state:
+    driver: local
+
+# ── Networks ─────────────────────────────────────────────────
+networks:
+  sw_net:
+    driver: bridge
+  web-proxy:
+    external: true

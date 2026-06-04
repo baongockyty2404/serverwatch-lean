@@ -1,0 +1,63 @@
+# ─── Secrets & environment ─────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# ─── Database & runtime data ───────────────────────────────
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data/
+backup/
+influxdb-data/
+scheduled_tasks.lock
+
+# ─── Logs ──────────────────────────────────────────────────
+*.log
+serverwatch-agent.log
+
+# ─── Archives & temp ───────────────────────────────────────
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.bak
+*.tmp
+*~
+
+# ─── SSL / Certs ───────────────────────────────────────────
+ssl/
+*.pem
+*.key
+*.crt
+*.cer
+
+# ─── IDE / Editor ──────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ─── Claude / agent workspace ──────────────────────────────
+.claude/

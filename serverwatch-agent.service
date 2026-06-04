@@ -1,0 +1,21 @@
+[Unit]
+Description=ServerWatch Monitoring Agent
+After=network.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/serverwatch
+ExecStart=/usr/bin/python3 /opt/serverwatch/agent.py \
+    --server http://127.0.0.1:8800 \
+    --token  YOUR_SECRET_TOKEN \
+    --interval 10
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=serverwatch-agent
+
+[Install]
+WantedBy=multi-user.target

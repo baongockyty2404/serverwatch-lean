@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ServerWatch Dashboard</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:   #f8f7f4; --bg2: #ffffff; --bg3: #f0efe9;
+      --txt:  #1a1a18; --txt2: #6b6a64; --txt3: #9b9a93;
+      --bdr:  rgba(0,0,0,0.1); --bdr2: rgba(0,0,0,0.18);
+      --ok:   #1D9E75; --warn: #BA7517; --crit: #E24B4A;
+      --info: #378ADD; --purple: #534AB7;
+      --r:    8px; --rl: 12px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1a1918; --bg2: #252421; --bg3: #111110;
+        --txt: #e8e6e0; --txt2: #9b9a93; --txt3: #6b6a64;
+        --bdr: rgba(255,255,255,0.1); --bdr2: rgba(255,255,255,0.18);
+      }
+    }
+    body { background: var(--bg3); color: var(--txt); font-family: system-ui, sans-serif; font-size: 13px; }
+    button { cursor: pointer; font-family: inherit; font-size: 12px; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ── cấu hình ─────────────────────────────────── */
+const _loc  = window.location;
+const _base = `${_loc.protocol}//${_loc.host}`;
+const _ws   = `${_loc.protocol === "https:" ? "wss:" : "ws:"}//${_loc.host}/ws`;
+
+const API   = (window.SW_API   || _base);
+const WS_BASE = (window.SW_WS || _ws);
+
+/* ── Auth state ──────────────────────────────────── */
+function getStoredToken() { return localStorage.getItem("sw_jwt") || ""; }
+function getStoredUser()  { try { return JSON.parse(localStorage.getItem("sw_user") || "null"); } catch { return null; } }
+
+function authHeaders() {
+  const t = getStoredToken();
+  return { Authorization: t ? `Bearer ${t}` : "", "Content-Type": "application/json" };
+}
+
+async function authFetch(url, opts = {}) {
+  const res = await fetch(url, { ...opts, headers: { ...authHeaders(), ...(opts.headers || {}) } });
+  if (res.status === 401) {
+    localStorage.removeItem("sw_jwt");
+    localStorage.removeItem("sw_user");
+    window.location.reload();
+  }
+  return res;
+}
+
+/* ── Login Screen ────────────────────────────────── */
+function LoginScreen({ onLogin }) {
+  const [email, setEmail]       = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError]       = useState("");
+  const [loading, setLoading]   = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(""); setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.detail || "Đăng nhập thất bại");
+        setLoading(false);
+        return;
+      }
+      localStorage.setItem("sw_jwt", data.token);
+      localStorage.setItem("sw_user", JSON.stringify(data.user));
+      onLogin(data.user, data.token);
+    } catch (err) {
+      setError("Không kết nối được server");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
+                  minHeight:"100vh", background:"var(--bg3)" }}>
+      <form onSubmit={handleSubmit} style={{
+        background:"var(--bg2)", borderRadius:16, padding:"40px 36px",
+        border:"0.5px solid var(--bdr)", width:380, maxWidth:"90vw",
+        boxShadow:"0 4px 24px rgba(0,0,0,0.08)"
+      }}>
+        <div style={{ textAlign:"center", marginBottom:28 }}>
+          <div style={{ fontSize:22, fontWeight:600, marginBottom:4 }}>ServerWatch</div>
+          <div style={{ color:"var(--txt2)", fontSize:13 }}>Đăng nhập để tiếp tục</div>
+        </div>
+
+        {error && (
+          <div style={{ background:"rgba(226,75,74,0.1)", border:"0.5px solid var(--crit)",
+                        borderRadius:8, padding:"8px 12px", marginBottom:16,
+                        color:"var(--crit)", fontSize:12 }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ marginBottom:14 }}>
+          <label style={{ display:"block", fontSize:12, color:"var(--txt2)",
+                          marginBottom:5, fontWeight:500 }}>Email</label>
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+            required autoFocus placeholder="admin@example.com"
+            style={{ width:"100%", padding:"9px 12px", borderRadius:8,
+                     border:"0.5px solid var(--bdr2)", background:"var(--bg3)",
+                     color:"var(--txt)", fontSize:13, outline:"none",
+                     fontFamily:"inherit" }} />
+        </div>
+
+        <div style={{ marginBottom:20 }}>
+          <label style={{ display:"block", fontSize:12, color:"var(--txt2)",
+                          marginBottom:5, fontWeight:500 }}>Mật khẩu</label>
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+            required placeholder="••••••••"
+            style={{ width:"100%", padding:"9px 12px", borderRadius:8,
+                     border:"0.5px solid var(--bdr2)", background:"var(--bg3)",
+                     color:"var(--txt)", fontSize:13, outline:"none",
+                     fontFamily:"inherit" }} />
+        </div>
+
+        <button type="submit" disabled={loading}
+          style={{ width:"100%", padding:"10px 0", borderRadius:8, border:"none",
+                   background:"var(--purple)", color:"#fff", fontSize:13,
+                   fontWeight:500, opacity: loading ? 0.7 : 1 }}>
+          {loading ? "Đang đăng nhập..." : "Đăng nhập"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+/* ── helpers ──────────────────────────────────── */
+const sev = s => s === "critical" ? "--crit" : s === "warning" ? "--warn" : "--info";
+const sevLabel = s => ({ critical: "CRITICAL", warning: "WARNING", info: "INFO" })[s] || s;
+
+function Bar({ pct, color }) {
+  const c = pct > 90 ? "--crit" : pct > 70 ? "--warn" : "--ok";
+  return (
+    <div style={{ height: 5, background: "var(--bg3)", borderRadius: 3, overflow: "hidden", marginTop: 4 }}>
+      <div style={{ width: `${Math.min(pct, 100)}%`, height: "100%",
+                    background: `var(${color || c})`, borderRadius: 3, transition: "width .4s" }} />
+    </div>
+  );
+}
+
+function Badge({ text, color }) {
+  return (
+    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 20,
+                   background: `var(--bg)`, border: `0.5px solid var(${color})`,
+                   color: `var(${color})`, fontWeight: 500 }}>
+      {text}
+    </span>
+  );
+}
+
+function MetricCard({ label, value, sub, pct, color }) {
+  return (
+    <div style={{ background: "var(--bg2)", border: "0.5px solid var(--bdr)",
+                  borderRadius: "var(--rl)", padding: 12 }}>
+      <div style={{ color: "var(--txt2)", marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 500, color: color ? `var(${color})` : "var(--txt)" }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: "var(--txt3)", marginTop: 2 }}>{sub}</div>}
+      {pct != null && <Bar pct={pct} color={color} />}
+    </div>
+  );
+}
+
+/* ── Sparkline SVG ────────────────────────────── */
+function Spark({ data, color = "--purple" }) {
+  if (!data || data.length < 2) return <div style={{ height: 50 }} />;
+  const mn = Math.min(...data), mx = Math.max(...data);
+  const range = mx - mn || 1;
+  const W = 300, H = 50;
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * W;
+    const y = H - ((v - mn) / range) * (H - 4) - 2;
+    return `${x},${y}`;
+  }).join(" ");
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="50" preserveAspectRatio="none">
+      <polyline fill="none" stroke={`var(${color})`} strokeWidth="1.5" points={pts} />
+    </svg>
+  );
+}
+
+/* ── useWebSocket ─────────────────────────────── */
+function useWebSocket(url, onMessage) {
+  const ws = useRef(null);
+  const [connected, setConnected] = useState(false);
+  useEffect(() => {
+    function connect() {
+      try {
+        ws.current = new WebSocket(url);
+        ws.current.onopen    = ()  => setConnected(true);
+        ws.current.onclose   = ()  => { setConnected(false); setTimeout(connect, 3000); };
+        ws.current.onerror   = ()  => ws.current.close();
+        ws.current.onmessage = (e) => { try { onMessage(JSON.parse(e.data)); } catch {} };
+      } catch {}
+    }
+    connect();
+    return () => ws.current?.close();
+  }, [url]);
+  return connected;
+}
+
+/* ── Docker Panel ─────────────────────────────── */
+function DockerPanel({ host, docker }) {
+  const [expandedLogs, setExpandedLogs] = useState(null);  // container name
+
+  if (!docker?.available) {
+    return (
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
+                    height:"50vh", color:"var(--txt3)" }}>
+        {host ? "Docker không khả dụng trên host này" : "Chọn máy chủ từ thanh bên"}
+      </div>
+    );
+  }
+
+  const s = docker.summary || {};
+  const containers = docker.containers || [];
+
+  const stateColor = (state, health) => {
+    if (health === "unhealthy") return "--crit";
+    if (state === "running") return "--ok";
+    if (state === "restarting") return "--warn";
+    return "--txt3";
+  };
+
+  return (
+    <div>
+      {/* Docker Summary */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:10, marginBottom:14 }}>
+        <MetricCard label="Tổng containers" value={s.total || 0} />
+        <MetricCard label="Running" value={s.running || 0} color="--ok" />
+        <MetricCard label="Stopped" value={s.stopped || 0} color="--txt3" />
+        <MetricCard label="Unhealthy" value={s.unhealthy || 0}
+          color={s.unhealthy > 0 ? "--crit" : "--ok"} />
+        <MetricCard label="Restarting" value={s.restarting || 0}
+          color={s.restarting > 0 ? "--warn" : "--ok"} />
+      </div>
+
+      {/* Container list */}
+      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+        {containers.map(c => (
+          <div key={c.id} style={{ background:"var(--bg2)", border:"0.5px solid var(--bdr)",
+                                    borderLeft:`3px solid var(${stateColor(c.state, c.health)})`,
+                                    borderRadius:"var(--r)", padding:12 }}>
+            {/* Header */}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+              <div>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontWeight:500, fontSize:13 }}>{c.name}</span>
+                  <Badge text={c.state} color={stateColor(c.state, c.health)} />
+                  {c.health && c.health !== "none" && c.health !== "unknown" &&
+                    <Badge text={c.health} color={c.health==="healthy"?"--ok":"--crit"} />}
+                  {c.restart_count > 0 &&
+                    <Badge text={`${c.restart_count} restarts`} color={c.restart_count>3?"--crit":"--warn"} />}
+                  {c.dangerous_activity?.length > 0 &&
+                    <Badge text="DANGEROUS" color="--crit" />}
+                </div>
+                <div style={{ color:"var(--txt3)", fontSize:11, marginTop:3 }}>
+                  {c.image} — {c.status}
+                </div>
+              </div>
+              {c.state === "running" && (
+                <div style={{ display:"flex", gap:12, fontSize:12, color:"var(--txt2)" }}>
+                  <span>CPU <b style={{ color: c.cpu_percent>80?"var(--crit)":c.cpu_percent>50?"var(--warn)":"var(--txt)" }}>
+                    {(c.cpu_percent||0).toFixed(1)}%</b></span>
+                  <span>MEM <b style={{ color: c.mem_percent>90?"var(--crit)":c.mem_percent>70?"var(--warn)":"var(--txt)" }}>
+                    {(c.mem_percent||0).toFixed(1)}%</b></span>
+                  <span>PIDs <b>{c.pids||0}</b></span>
+                </div>
+              )}
+              {c.state === "exited" && c.exit_code !== undefined && (
+                <Badge text={`exit: ${c.exit_code}`} color={c.exit_code===0?"--ok":"--crit"} />
+              )}
+            </div>
+
+            {/* Resource bars */}
+            {c.state === "running" && (
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+                <div>
+                  <div style={{ fontSize:11, color:"var(--txt3)" }}>CPU</div>
+                  <Bar pct={c.cpu_percent||0} />
+                </div>
+                <div>
+                  <div style={{ fontSize:11, color:"var(--txt3)" }}>Memory ({c.mem_usage || ""})</div>
+                  <Bar pct={c.mem_percent||0} />
+                </div>
+              </div>
+            )}
+
+            {/* Network & Block I/O */}
+            {c.net_io && (
+              <div style={{ fontSize:11, color:"var(--txt3)", marginBottom:6 }}>
+                Net I/O: {c.net_io} — Block I/O: {c.block_io || "N/A"}
+                {c.ports && ` — Ports: ${c.ports}`}
+              </div>
+            )}
+
+            {/* Error indicators */}
+            {c.log_error_count > 0 && (
+              <div style={{ fontSize:11, color:"var(--warn)", marginBottom:4 }}>
+                {c.log_error_count} lỗi phát hiện trong log
+              </div>
+            )}
+
+            {/* Dangerous activity warning */}
+            {c.dangerous_activity?.length > 0 && (
+              <div style={{ background:"rgba(226,75,74,0.1)", border:"0.5px solid var(--crit)",
+                            borderRadius:6, padding:8, marginBottom:6 }}>
+                <div style={{ fontSize:11, fontWeight:500, color:"var(--crit)", marginBottom:4 }}>
+                  Hành vi nguy hiểm phát hiện:
+                </div>
+                {c.dangerous_activity.map((d,i) => (
+                  <div key={i} style={{ fontSize:11, fontFamily:"monospace", color:"var(--crit)",
+                                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                    {d.line}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Expandable logs */}
+            <button onClick={() => setExpandedLogs(expandedLogs === c.name ? null : c.name)}
+              style={{ fontSize:11, padding:"3px 8px", borderRadius:5,
+                       border:"0.5px solid var(--bdr2)", background:"var(--bg3)",
+                       color:"var(--txt2)" }}>
+              {expandedLogs === c.name ? "Ẩn logs" : "Xem logs"}
+            </button>
+
+            {expandedLogs === c.name && (
+              <div style={{ marginTop:8 }}>
+                {/* Error logs */}
+                {c.log_errors?.length > 0 && (
+                  <div style={{ marginBottom:8 }}>
+                    <div style={{ fontSize:11, fontWeight:500, color:"var(--crit)", marginBottom:4 }}>
+                      Lỗi gần đây:
+                    </div>
+                    <div style={{ background:"var(--bg3)", borderRadius:6, padding:8,
+                                  maxHeight:150, overflowY:"auto" }}>
+                      {c.log_errors.map((e,i) => (
+                        <div key={i} style={{ fontSize:10, fontFamily:"monospace",
+                                              color:"var(--crit)", marginBottom:2,
+                                              wordBreak:"break-all" }}>
+                          {e}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Recent logs */}
+                <div>
+                  <div style={{ fontSize:11, fontWeight:500, color:"var(--txt2)", marginBottom:4 }}>
+                    Log gần nhất:
+                  </div>
+                  <div style={{ background:"var(--bg3)", borderRadius:6, padding:8,
+                                maxHeight:200, overflowY:"auto" }}>
+                    {(c.recent_logs||[]).map((l,i) => (
+                      <div key={i} style={{ fontSize:10, fontFamily:"monospace",
+                                            color:"var(--txt2)", marginBottom:2,
+                                            wordBreak:"break-all" }}>
+                        {l}
+                      </div>
+                    ))}
+                    {(!c.recent_logs || c.recent_logs.length === 0) && (
+                      <div style={{ fontSize:11, color:"var(--txt3)" }}>Không có log</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {containers.length === 0 && (
+          <div style={{ textAlign:"center", color:"var(--txt3)", padding:40 }}>
+            Không có container nào
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Halaman utama ────────────────────────────── */
+/* ════════════════════════════════════════════════════════════════════
+   OPS PANELS — Phase 1+2+3 features
+   ════════════════════════════════════════════════════════════════════ */
+
+function fmtTs(s) {
+  if (!s) return "—";
+  return s.slice(0, 16).replace("T", " ");
+}
+function statusColor(s) {
+  return ({ ok:"--ok", warning:"--warn", critical:"--crit", error:"--crit",
+           firing:"--crit", resolved:"--ok" })[s] || "--txt3";
+}
+function Card({ title, children, action }) {
+  return (
+    <div style={{ background:"var(--bg2)", border:"0.5px solid var(--bdr)",
+                  borderRadius:"var(--rl)", padding:14, marginBottom:14 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+                    marginBottom:10 }}>
+        <div style={{ fontSize:13, fontWeight:500 }}>{title}</div>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+function Btn({ onClick, children, color = "--txt2", danger }) {
+  return (
+    <button onClick={onClick} style={{
+      padding:"4px 10px", borderRadius:6,
+      border:`0.5px solid var(${danger?'--crit':'--bdr2'})`,
+      background:"transparent",
+      color:`var(${danger?'--crit':color})`,
+      fontSize:11
+    }}>{children}</button>
+  );
+}
+function Tbl({ cols, rows, empty = "Chưa có dữ liệu" }) {
+  if (!rows || rows.length === 0)
+    return <div style={{ color:"var(--txt3)", padding:"12px 0", textAlign:"center" }}>{empty}</div>;
+  return (
+    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+      <thead>
+        <tr style={{ color:"var(--txt3)", borderBottom:"0.5px solid var(--bdr)" }}>
+          {cols.map((c,i) => <td key={i} style={{ padding:"6px 4px", fontWeight:500 }}>{c}</td>)}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r,i) => (
+          <tr key={i} style={{ borderBottom:"0.5px solid var(--bdr)" }}>
+            {r.map((cell,j) => <td key={j} style={{ padding:"6px 4px" }}>{cell}</td>)}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/* ── Active Alert States (dedup) ─────────────────────────────────── */
+function StatesPanel() {
+  const [data, setData] = useState([]);
+  const reload = () => authFetch(`${API}/api/alert-states`)
+    .then(r=>r.json()).then(d => setData(d.alerts || []));
+  useEffect(() => { reload(); const t = setInterval(reload, 15000); return () => clearInterval(t); }, []);
+
+  const ack = (fp) => {
+    if (!confirm("Acknowledge alert?")) return;
+    authFetch(`${API}/api/oncall/ack/${fp}`, { method:"POST" }).then(reload);
+  };
+
+  return (
+    <Card title={`Active alerts (${data.length})`} action={<Btn onClick={reload}>↻</Btn>}>
+      <Tbl cols={["Host", "Type", "Sev", "Detail", "Lần", "Last seen", "Ack"]}
+        rows={data.map(a => [
+          a.host,
+          <code style={{ fontSize:11 }}>{a.type}</code>,
+          <span style={{ color:`var(${statusColor(a.severity)})` }}>{a.severity}</span>,
+          <span style={{ fontSize:11 }}>{(a.detail||"").slice(0, 80)}</span>,
+          a.occurrences,
+          fmtTs(a.last_seen),
+          a.ack_by
+            ? <span style={{ color:"var(--ok)", fontSize:11 }}>✓ {a.ack_by}</span>
+            : <Btn onClick={() => ack(a.fingerprint)}>Ack</Btn>,
+        ])}
+        empty="✅ Không có alert đang firing" />
+    </Card>
+  );
+}
+
+/* ── Silences ────────────────────────────────────────────────────── */
+function SilencesPanel() {
+  const [data, setData] = useState([]);
+  const [form, setForm] = useState({ host:"*", type:"*", duration:"1h", reason:"" });
+  const reload = () => authFetch(`${API}/api/silences`)
+    .then(r=>r.json()).then(d => setData(d.silences || []));
+  useEffect(() => { reload(); }, []);
+
+  const parseDur = (s) => {
+    const m = String(s).match(/^(\d+)([smhd])$/);
+    if (!m) return 0;
+    return parseInt(m[1]) * ({ s:1, m:60, h:3600, d:86400 }[m[2]]);
+  };
+
+  const add = () => {
+    const dur = parseDur(form.duration);
+    if (!dur) return alert("Duration: 30m, 2h, 1d");
+    authFetch(`${API}/api/silences`, {
+      method: "POST",
+      body: JSON.stringify({
+        host_pattern: form.host, type_pattern: form.type,
+        duration_sec: dur, reason: form.reason,
+      })
+    }).then(r=>r.json()).then(d => {
+      if (d.id) reload();
+      else alert(d.detail || "Lỗi");
+    });
+  };
+
+  const remove = (id) => authFetch(`${API}/api/silences/${id}/remove`, { method:"POST" }).then(reload);
+
+  return (
+    <Card title={`Silences active (${data.length})`}>
+      <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
+        <input placeholder="host pattern (* hoặc tên)" value={form.host}
+          onChange={e=>setForm({...form, host:e.target.value})}
+          style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", width:140 }} />
+        <input placeholder="type pattern" value={form.type}
+          onChange={e=>setForm({...form, type:e.target.value})}
+          style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", width:140 }} />
+        <input placeholder="30m / 2h / 1d" value={form.duration}
+          onChange={e=>setForm({...form, duration:e.target.value})}
+          style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", width:80 }} />
+        <input placeholder="lý do" value={form.reason}
+          onChange={e=>setForm({...form, reason:e.target.value})}
+          style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", flex:1, minWidth:120 }} />
+        <Btn onClick={add} color="--ok">+ Tạo silence</Btn>
+      </div>
+      <Tbl cols={["#", "Host", "Type", "Hết hạn", "Bởi", "Lý do", ""]}
+        rows={data.map(s => [
+          s.id,
+          <code style={{ fontSize:11 }}>{s.host_pattern}</code>,
+          <code style={{ fontSize:11 }}>{s.type_pattern}</code>,
+          fmtTs(s.expires_at),
+          <span style={{ fontSize:11, color:"var(--txt3)" }}>{s.created_by}</span>,
+          <span style={{ fontSize:11 }}>{s.reason}</span>,
+          <Btn onClick={() => remove(s.id)} danger>Xoá</Btn>,
+        ])}
+        empty="Không có silence" />
+    </Card>
+  );
+}
+
+/* ── Monitors (cert/domain/http/tcp) ─────────────────────────────── */
+function MonitorsPanel() {
+  const [data, setData] = useState([]);
+  const [form, setForm] = useState({ kind:"cert", target:"", interval:3600 });
+  const reload = () => authFetch(`${API}/api/monitors`)
+    .then(r=>r.json()).then(d => setData(d.monitors || []));
+  useEffect(() => { reload(); const t=setInterval(reload, 30000); return ()=>clearInterval(t); }, []);
+
+  const add = () => {
+    if (!form.target) return alert("Nhập target");
+    authFetch(`${API}/api/monitors`, {
+      method:"POST",
+      body: JSON.stringify({ kind: form.kind, target: form.target, interval_sec: parseInt(form.interval) })
+    }).then(r=>r.json()).then(d => { if (d.id) reload(); else alert(d.detail||"Lỗi"); });
+  };
+  const run = (id) => authFetch(`${API}/api/monitors/${id}/run`, { method:"POST" })
+    .then(r=>r.json()).then(d => { alert(`${d.status?.toUpperCase()}: ${d.detail}`); reload(); });
+  const remove = (id) => confirm("Xoá monitor?") &&
+    authFetch(`${API}/api/monitors/${id}/delete`, { method:"POST" }).then(reload);
+
+  return (
+    <Card title={`Monitors (${data.length})`}>
+      <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
+        <select value={form.kind} onChange={e=>setForm({...form, kind:e.target.value})}
+          style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)" }}>
+          <option value="cert">SSL cert</option>
+          <option value="domain">Domain (WHOIS)</option>
+          <option value="http">HTTP</option>
+          <option value="tcp">TCP</option>
+        </select>
+        <input placeholder={form.kind==="http"?"https://example.com/health":"example.com"} value={form.target}
+          onChange={e=>setForm({...form, target:e.target.value})}
+          style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", flex:1, minWidth:200 }} />
+        <input type="number" value={form.interval} onChange={e=>setForm({...form, interval:e.target.value})}
+          style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", width:80 }} />
+        <Btn onClick={add} color="--ok">+ Thêm</Btn>
+      </div>
+      <Tbl cols={["#", "Kind", "Target", "Interval", "Status", "Detail", "Last", ""]}
+        rows={data.map(m => [
+          m.id,
+          <code style={{ fontSize:11 }}>{m.kind}</code>,
+          <span style={{ fontSize:11 }}>{m.target}</span>,
+          `${m.interval_sec}s`,
+          <span style={{ color:`var(${statusColor(m.last_status)})` }}>{m.last_status||"—"}</span>,
+          <span style={{ fontSize:11, color:"var(--txt2)" }}>{(m.last_detail||"").slice(0,60)}</span>,
+          <span style={{ fontSize:11, color:"var(--txt3)" }}>{fmtTs(m.last_checked)}</span>,
+          <span><Btn onClick={()=>run(m.id)}>Run</Btn> <Btn onClick={()=>remove(m.id)} danger>×</Btn></span>,
+        ])}
+        empty="Chưa có monitor — tạo cert/domain/http/tcp" />
+    </Card>
+  );
+}
+
+/* ── SLO ──────────────────────────────────────────────────────────── */
+function UsersPanel() {
+  const [data, setData] = useState([]);
+  const [form, setForm] = useState({ email:"", password:"", name:"", role:"viewer" });
+  const reload = () => authFetch(`${API}/api/users`)
+    .then(r=>r.json()).then(d => setData(d.users || []));
+  useEffect(() => { reload(); }, []);
+
+  const add = () => {
+    if (!form.email || !form.password) return alert("Email + password");
+    authFetch(`${API}/api/users`, { method:"POST", body: JSON.stringify(form) })
+      .then(r=>r.json()).then(d => {
+        if (d.id) { setForm({ email:"", password:"", name:"", role:"viewer" }); reload(); }
+        else alert(d.detail||"Lỗi");
+      });
+  };
+  const setRole = (uid, role) => authFetch(`${API}/api/users/${uid}/role`, {
+    method:"POST", body: JSON.stringify({ role })
+  }).then(reload);
+  const remove = (uid) => confirm("Xoá user?") &&
+    authFetch(`${API}/api/users/${uid}/delete`, { method:"POST" }).then(reload);
+
+  return (
+    <Card title={`Users (${data.length})`}>
+      <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
+        <input placeholder="email" value={form.email} onChange={e=>setForm({...form, email:e.target.value})}
+          style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", width:180 }} />
+        <input type="password" placeholder="password" value={form.password}
+          onChange={e=>setForm({...form, password:e.target.value})}
+          style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", width:140 }} />
+        <input placeholder="tên" value={form.name} onChange={e=>setForm({...form, name:e.target.value})}
+          style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", width:120 }} />
+        <select value={form.role} onChange={e=>setForm({...form, role:e.target.value})}
+          style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)" }}>
+          <option value="viewer">viewer</option>
+          <option value="operator">operator</option>
+          <option value="admin">admin</option>
+        </select>
+        <Btn onClick={add} color="--ok">+ Tạo user</Btn>
+      </div>
+      <Tbl cols={["#", "Email", "Tên", "Role", "Tạo", "Last login", ""]}
+        rows={data.map(u => [
+          u.id, <code>{u.email}</code>, u.name||"—",
+          <select value={u.role} onChange={e=>setRole(u.id, e.target.value)}
+            style={{ padding:"2px 4px", fontSize:11, background:"var(--bg)", color:"var(--txt)",
+                      border:"0.5px solid var(--bdr2)", borderRadius:4 }}>
+            <option value="viewer">viewer</option>
+            <option value="operator">operator</option>
+            <option value="admin">admin</option>
+          </select>,
+          <span style={{ fontSize:11, color:"var(--txt3)" }}>{fmtTs(u.created_at)}</span>,
+          <span style={{ fontSize:11, color:"var(--txt3)" }}>{fmtTs(u.last_login)}</span>,
+          <Btn onClick={()=>remove(u.id)} danger>×</Btn>,
+        ])}
+        empty="Chưa có user" />
+    </Card>
+  );
+}
+
+/* ── Settings (Telegram/Email/AI config) ─────────────────────────── */
+function SettingsPanel() {
+  const [data, setData] = useState([]);
+  const [dirty, setDirty] = useState({});       // key → new value
+  const [show, setShow] = useState({});         // key → reveal secret?
+  const [msg, setMsg] = useState("");
+
+  const reload = () => authFetch(`${API}/api/settings`)
+    .then(r=>r.json()).then(d => { setData(d.settings || []); setDirty({}); });
+  useEffect(() => { reload(); }, []);
+
+  const save = async () => {
+    const updates = Object.entries(dirty).map(([key, value]) => ({ key, value }));
+    if (updates.length === 0) { setMsg("Không có thay đổi"); return; }
+    setMsg("Đang lưu...");
+    const r = await authFetch(`${API}/api/settings`, {
+      method: "POST", body: JSON.stringify({ updates })
+    }).then(r=>r.json());
+    if (r.errors?.length) setMsg(`Lưu ${r.updated}, lỗi: ${r.errors.join("; ")}`);
+    else setMsg(`✓ Đã lưu ${r.updated} setting`);
+    reload();
+  };
+
+  const testTelegram = async () => {
+    setMsg("Đang gửi test Telegram...");
+    const r = await authFetch(`${API}/api/settings/test/telegram`, { method: "POST" })
+      .then(r=>r.json());
+    setMsg(r.status === "sent"
+      ? "✓ Đã gửi tin nhắn test — check Telegram"
+      : `× skipped: token=${r.token_set} chat=${r.chat_id_set}`);
+  };
+
+  const testEmail = async () => {
+    setMsg("Đang gửi test email...");
+    const r = await authFetch(`${API}/api/settings/test/email`, { method: "POST" })
+      .then(r=>r.json()).catch(e => ({ detail: e.message }));
+    setMsg(r.status === "sent" ? "✓ Đã gửi email test" : `× ${r.detail || "fail"}`);
+  };
+
+  const resetKey = async (key) => {
+    if (!confirm(`Xoá override cho ${key}? Sẽ fallback về ENV/default.`)) return;
+    await authFetch(`${API}/api/settings/${key}/delete`, { method: "POST" });
+    reload();
+  };
+
+  // Group by "group" field
+  const byGroup = {};
+  data.forEach(s => { (byGroup[s.group] = byGroup[s.group] || []).push(s); });
+
+  const sourceBadge = (s) => {
+    const color = s.source === "db" ? "--info" : s.source === "env" ? "--txt2" : "--txt3";
+    const label = s.source === "db" ? "DB" : s.source === "env" ? `ENV:${s.env_var}` : "default";
+    return <span style={{ fontSize:10, color:`var(${color})`, marginLeft:4 }}>[{label}]</span>;
+  };
+
+  return (
+    <Card title="Settings — cấu hình runtime (không cần restart)"
+      action={<>
+        <Btn onClick={testTelegram}>📨 Test Telegram</Btn>{" "}
+        <Btn onClick={testEmail}>✉ Test Email</Btn>{" "}
+        <Btn onClick={save} color="--ok">💾 Lưu</Btn>
+      </>}>
+      {msg && <div style={{ padding:8, marginBottom:10, background:"var(--bg)",
+                             borderRadius:6, fontSize:12,
+                             color: msg.startsWith("✓") ? "var(--ok)" :
+                                     msg.startsWith("×") ? "var(--crit)" : "var(--txt2)" }}>
+        {msg}
+      </div>}
+      <div style={{ fontSize:11, color:"var(--txt3)", marginBottom:10 }}>
+        Thứ tự ưu tiên: <b>DB</b> (sửa ở đây) → <b>ENV</b> (.env) → <b>default</b>.
+        Server-side dispatcher đọc cache mới trong &lt; 15s. Telegram polling bot (sw-telegram container)
+        vẫn dùng ENV cũ cho đến khi restart container.
+      </div>
+      {Object.keys(byGroup).sort().map(group => (
+        <div key={group} style={{ marginBottom:14 }}>
+          <div style={{ fontSize:12, fontWeight:500, color:"var(--txt2)",
+                        paddingBottom:4, marginBottom:6,
+                        borderBottom:"0.5px solid var(--bdr)" }}>
+            {group}
+          </div>
+          {byGroup[group].map(s => {
+            const current = dirty[s.key] !== undefined ? dirty[s.key] : (
+              s.source === "db" && !s.is_secret ? s.value : ""
+            );
+            const placeholder = s.is_secret && s.has_value
+              ? s.value
+              : (s.source !== "db" && s.value ? `fallback: ${s.value}` : "");
+            return (
+              <div key={s.key} style={{ display:"flex", alignItems:"center",
+                                         gap:8, padding:"6px 0",
+                                         borderTop:"0.5px dashed var(--bdr)" }}>
+                <div style={{ width:260, flexShrink:0 }}>
+                  <div style={{ fontSize:12, fontWeight:500 }}>
+                    {s.label}
+                    {s.is_secret && <span style={{ fontSize:10, color:"var(--warn)", marginLeft:6 }}>🔒</span>}
+                    {sourceBadge(s)}
+                  </div>
+                  <div style={{ fontSize:10, color:"var(--txt3)" }}>
+                    <code>{s.key}</code> · {s.description}
+                  </div>
+                </div>
+                <input
+                  type={s.is_secret && !show[s.key] ? "password" : "text"}
+                  placeholder={placeholder}
+                  value={current}
+                  onChange={e => setDirty(prev => ({ ...prev, [s.key]: e.target.value }))}
+                  style={{ flex:1, padding:"4px 8px",
+                            border:"0.5px solid var(--bdr2)", borderRadius:6,
+                            background:"var(--bg)", color:"var(--txt)",
+                            fontFamily: s.is_secret ? "monospace" : "inherit" }}
+                />
+                {s.is_secret && (
+                  <Btn onClick={() => setShow(prev => ({ ...prev, [s.key]: !prev[s.key] }))}>
+                    {show[s.key] ? "🙈" : "👁"}
+                  </Btn>
+                )}
+                {s.source === "db" && <Btn onClick={() => resetKey(s.key)} danger>reset</Btn>}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+/* ── Backup ──────────────────────────────────────────────────────── */
+function BackupPanel() {
+  const [data, setData] = useState({ backups: [], retention_days: 30 });
+  const [status, setStatus] = useState({ running: false });
+  const [lookback, setLookback] = useState(30);
+  const [verifyResult, setVerifyResult] = useState({});
+
+  const reload = () => authFetch(`${API}/api/backup/list`)
+    .then(r=>r.json()).then(setData).catch(()=>{});
+  const reloadStatus = () => authFetch(`${API}/api/backup/status`)
+    .then(r=>r.json()).then(setStatus).catch(()=>{});
+  useEffect(() => {
+    reload(); reloadStatus();
+    const t = setInterval(() => { reloadStatus(); reload(); }, 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  const runNow = async () => {
+    const r = await authFetch(`${API}/api/backup/run`, {
+      method: "POST",
+      body: JSON.stringify({ lookback_days: parseInt(lookback) }),
+    }).then(r=>r.json()).catch(() => ({ detail: "request failed" }));
+    if (r.status === "started") reloadStatus();
+    else alert(`❌ ${r.detail || "fail"}`);
+  };
+
+  const doVerify = async (name) => {
+    setVerifyResult(prev => ({ ...prev, [name]: { loading: true } }));
+    const r = await authFetch(`${API}/api/backup/${name}/verify`, { method:"POST" })
+      .then(r=>r.json());
+    setVerifyResult(prev => ({ ...prev, [name]: r }));
+  };
+
+  const remove = async (name) => {
+    if (!confirm(`Xoá ${name}?`)) return;
+    await authFetch(`${API}/api/backup/${name}/delete`, { method:"POST" });
+    reload();
+  };
+
+  const download = (name) => {
+    window.open(`${API}/api/backup/${name}/download`, "_blank");
+  };
+
+  return (
+    <Card title={`Backups (${data.backups?.length||0})`}
+      action={<><span style={{ fontSize:11, color:"var(--txt3)", marginRight:10 }}>
+        retention: {data.retention_days}d · {data.schedule_utc}
+      </span>
+        <input type="number" min="1" max="365" value={lookback}
+          onChange={e=>setLookback(e.target.value)} title="Influx lookback (days)"
+          style={{ padding:"3px 6px", border:"0.5px solid var(--bdr2)", borderRadius:6,
+                    background:"var(--bg)", color:"var(--txt)", width:60, marginRight:6,
+                    fontSize:11 }} />
+        <Btn onClick={runNow} color="--ok">
+          {status.running ? "🔄 đang chạy..." : "Backup ngay"}
+        </Btn>
+      </>}>
+      <div style={{ fontSize:11, color:"var(--txt3)", marginBottom:10 }}>
+        Dir: <code>{data.backup_dir}</code> · Mỗi backup = SQLite + InfluxDB (N-day line protocol) + audit logs, ký HMAC.
+        {status.last_error && <div style={{ color:"var(--crit)", marginTop:4 }}>
+          ⚠ Lỗi lần trước: {status.last_error}
+        </div>}
+        {status.last_result && !status.running && <div style={{ color:"var(--ok)", marginTop:4 }}>
+          ✓ Lần gần nhất: {status.last_result.name} ({(status.last_result.bytes/1024/1024).toFixed(1)} MB)
+        </div>}
+      </div>
+      <Tbl cols={["File", "Khi", "Size", "SQLite rows", "Influx pts", "Audit", "Actions"]}
+        rows={(data.backups||[]).map(b => {
+          const v = verifyResult[b.name];
+          const rows = b.summary?.sqlite_rows || {};
+          const totalRows = Object.values(rows).reduce((s,n) => s + (n>0?n:0), 0);
+          return [
+            <code style={{ fontSize:11 }}>{b.name}</code>,
+            <span style={{ fontSize:11, color:"var(--txt3)" }}>
+              {fmtTs(b.summary?.created_at || b.mtime)}
+            </span>,
+            `${(b.bytes/1024).toFixed(1)} KB`,
+            <span title={Object.entries(rows).map(([k,v])=>`${k}:${v}`).join(", ")}>
+              {totalRows}
+            </span>,
+            b.summary?.influx_points || 0,
+            b.summary?.audit_files || 0,
+            <span style={{ display:"flex", gap:4, alignItems:"center" }}>
+              <Btn onClick={()=>doVerify(b.name)}>
+                {v?.loading ? "..." : v ? (v.ok ? "✓" : "✗") : "Verify"}
+              </Btn>
+              <Btn onClick={()=>download(b.name)}>↓</Btn>
+              <Btn onClick={()=>remove(b.name)} danger>×</Btn>
+              {v && !v.loading && (
+                <span style={{ fontSize:10, color: v.ok?"var(--ok)":"var(--crit)" }}>
+                  {v.ok ? "OK" :
+                    `${!v.hmac_ok?"hmac✗ ":""}${!v.files_ok?"files✗ ":""}${!v.sqlite?.integrity_ok?"sql✗":""}`}
+                </span>
+              )}
+            </span>,
+          ];
+        })}
+        empty="Chưa có backup — click 'Backup ngay' hoặc đợi cron UTC 19:00" />
+    </Card>
+  );
+}
+
+/* ── OPS Tab — sub-navigation ────────────────────────────────────── */
+function OpsTab({ hosts }) {
+  const [sub, setSub] = useState("states");
+  const subs = [
+    ["states",    "Active Alerts"],
+    ["silences",  "Silences"],
+    ["monitors",  "Monitors"],
+    ["users",     "Users"],
+    ["backup",    "Backup"],
+    ["settings",  "Settings"],
+  ];
+  return (
+    <div>
+      <div style={{ display:"flex", gap:4, marginBottom:14, flexWrap:"wrap",
+                    borderBottom:"0.5px solid var(--bdr)", paddingBottom:8 }}>
+        {subs.map(([k, label]) => (
+          <button key={k} onClick={() => setSub(k)} style={{
+            padding:"4px 10px", borderRadius:6, border:"none",
+            background: sub === k ? "var(--bg2)" : "transparent",
+            fontWeight: sub === k ? 500 : 400,
+            color: sub === k ? "var(--txt)" : "var(--txt2)",
+          }}>{label}</button>
+        ))}
+      </div>
+      <ErrorBoundary key={sub} fallback={`Panel ${sub} bị lỗi runtime`}>
+        {sub === "states"   && <StatesPanel />}
+        {sub === "silences" && <SilencesPanel />}
+        {sub === "monitors" && <MonitorsPanel />}
+        {sub === "users"    && <UsersPanel />}
+        {sub === "backup"   && <BackupPanel />}
+        {sub === "settings" && <SettingsPanel />}
+      </ErrorBoundary>
+    </div>
+  );
+}
+
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(err) { return { error: err }; }
+  componentDidCatch(err, info) { console.error("Panel error:", err, info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding:14, background:"var(--bg2)",
+                      border:"1px solid var(--crit)", borderRadius:6,
+                      color:"var(--crit)", fontFamily:"monospace", fontSize:12 }}>
+          <div style={{ fontWeight:600, marginBottom:6 }}>{this.props.fallback}</div>
+          <div>{String(this.state.error?.message || this.state.error)}</div>
+          <pre style={{ marginTop:6, fontSize:11, overflow:"auto" }}>
+            {this.state.error?.stack?.split("\n").slice(0,5).join("\n")}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function App({ user, onLogout }) {
+  const [hosts, setHosts]         = useState([]);
+  const [selected, setSelected]   = useState(null);
+  const [metrics, setMetrics]     = useState({});   // host → latest data
+  const [alerts, setAlerts]       = useState([]);
+  const [summary, setSummary]     = useState({});
+  const [history, setHistory]     = useState({});   // host → { cpu: [], ram: [] }
+  const [activeTab, setActiveTab] = useState("dashboard");
+
+  /* HTTP initial load */
+  useEffect(() => {
+    authFetch(`${API}/api/hosts`).then(r=>r.json()).then(setHosts).catch(()=>{});
+    authFetch(`${API}/api/alerts?limit=30`).then(r=>r.json()).then(setAlerts).catch(()=>{});
+    authFetch(`${API}/api/summary`).then(r=>r.json()).then(setSummary).catch(()=>{});
+  }, []);
+
+  /* WebSocket */
+  const wsUrl = `${WS_BASE}?token=${encodeURIComponent(getStoredToken())}`;
+  const connected = useWebSocket(wsUrl, useCallback((msg) => {
+    if (msg.type === "snapshot") {
+      const data = msg.data;
+      setMetrics(data);
+      if (!selected && Object.keys(data).length > 0)
+        setSelected(Object.keys(data)[0]);
+    }
+    if (msg.type === "metrics_update") {
+      const d = msg.data;
+      setMetrics(prev => ({ ...prev, [d.host]: d }));
+      // Cập nhật summary
+      setSummary(prev => ({ ...prev, online_hosts: Object.keys(metrics).length + 1 }));
+      // Lưu lịch sử sparkline
+      setHistory(prev => {
+        const h = prev[d.host] || { cpu: [], ram: [], net: [] };
+        return {
+          ...prev,
+          [d.host]: {
+            cpu: [...h.cpu.slice(-60), d.metrics?.cpu?.percent ?? 0],
+            ram: [...h.ram.slice(-60), d.metrics?.memory?.percent ?? 0],
+            net: [...h.net.slice(-60), d.metrics?.network?.bytes_recv_mb ?? 0],
+          }
+        };
+      });
+      // Thêm alert mới
+      if (d.alerts?.length) {
+        setAlerts(prev => [
+          ...d.alerts.map(a => ({ ...a, host: d.host, timestamp: new Date().toISOString() })),
+          ...prev,
+        ].slice(0, 100));
+      }
+    }
+  }, [selected, metrics]));
+
+  const selData = selected && metrics[selected];
+  const m = selData?.metrics;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+      {/* Topbar */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "9px 16px", background: "var(--bg2)",
+                    borderBottom: "0.5px solid var(--bdr)", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontWeight: 500, fontSize: 15 }}>ServerWatch</span>
+          <Badge text={connected ? `${Object.keys(metrics).length} online` : "Đang kết nối..."} color={connected ? "--ok" : "--warn"} />
+          {summary.critical_hosts > 0 && <Badge text={`${summary.critical_hosts} critical`} color="--crit" />}
+          {summary.warning_hosts  > 0 && <Badge text={`${summary.warning_hosts} warning`}  color="--warn" />}
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {["dashboard", "docker", "alerts", "ops"].map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)}
+              style={{ padding: "4px 12px", borderRadius: 7, border: "none",
+                       background: activeTab === tab ? "var(--bg3)" : "transparent",
+                       fontWeight: activeTab === tab ? 500 : 400,
+                       color: activeTab === tab ? "var(--txt)" : "var(--txt2)" }}>
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === "alerts" && alerts.filter(a=>a.severity==="critical").length > 0 &&
+                <span style={{ marginLeft: 4, fontSize: 10, color: "var(--crit)" }}>
+                  {alerts.filter(a=>a.severity==="critical").length}
+                </span>}
+              {tab === "docker" && (() => {
+                const d = selData?.metrics?.docker;
+                const u = d?.summary?.unhealthy || 0;
+                return u > 0 ? <span style={{ marginLeft: 4, fontSize: 10, color: "var(--crit)" }}>{u}</span> : null;
+              })()}
+            </button>
+          ))}
+          <div style={{ marginLeft:12, display:"flex", alignItems:"center", gap:8,
+                        borderLeft:"0.5px solid var(--bdr)", paddingLeft:12 }}>
+            <span style={{ fontSize:11, color:"var(--txt2)" }}>{user?.email}</span>
+            <button onClick={onLogout}
+              style={{ padding:"3px 10px", borderRadius:6,
+                       border:"0.5px solid var(--bdr2)", background:"transparent",
+                       color:"var(--txt2)", fontSize:11 }}>
+              Đăng xuất
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        {/* Sidebar */}
+        <div style={{ width: 200, borderRight: "0.5px solid var(--bdr)",
+                      padding: "10px 8px", background: "var(--bg2)",
+                      overflowY: "auto", flexShrink: 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 500, color: "var(--txt3)",
+                        padding: "0 8px 8px", letterSpacing: .5 }}>
+            MÁY CHỦ ({hosts.length})
+          </div>
+          {hosts.map(h => {
+            const hm   = metrics[h.hostname];
+            const cpu  = hm?.metrics?.cpu?.percent ?? null;
+            const hasCrit = hm?.alerts?.some(a => a.severity === "critical");
+            const hasWarn = hm?.alerts?.some(a => a.severity === "warning");
+            const dotColor = hasCrit ? "var(--crit)" : hasWarn ? "var(--warn)" : "var(--ok)";
+            return (
+              <div key={h.hostname} onClick={() => setSelected(h.hostname)}
+                style={{ display: "flex", alignItems: "center", gap: 8,
+                         padding: "6px 8px", borderRadius: 8, cursor: "pointer",
+                         marginBottom: 1,
+                         background: selected === h.hostname ? "var(--bg3)" : "transparent" }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%",
+                              background: dotColor, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: selected===h.hostname?500:400,
+                                overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                    {h.hostname}
+                  </div>
+                  {cpu != null && <div style={{ fontSize: 10, color: "var(--txt3)" }}>CPU {cpu.toFixed(0)}%</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Main */}
+        <div style={{ flex: 1, padding: 16, overflowY: "auto", background: "var(--bg3)" }}>
+          {activeTab === "dashboard" ? (
+            <>
+              {selData && m ? (
+                <>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
+                    <div>
+                      <div style={{ fontSize:15, fontWeight:500 }}>{selected}</div>
+                      <div style={{ color:"var(--txt2)", marginTop:2 }}>
+                        {selData.timestamp?.slice(0,19).replace("T"," ")} UTC
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", gap:6 }}>
+                      {selData.alerts?.filter(a=>a.severity==="critical").map((a,i) => (
+                        <Badge key={i} text={a.type} color="--crit" />
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Metric cards */}
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(4,minmax(0,1fr))", gap:10, marginBottom:14 }}>
+                    <MetricCard label="CPU" value={`${m.cpu.percent.toFixed(0)}%`}
+                      sub={`${m.cpu.count} cores`}
+                      pct={m.cpu.percent}
+                      color={m.cpu.percent>90?"--crit":m.cpu.percent>70?"--warn":null} />
+                    <MetricCard label="RAM" value={`${m.memory.percent.toFixed(0)}%`}
+                      sub={`${m.memory.used_gb} / ${m.memory.total_gb} GB`}
+                      pct={m.memory.percent}
+                      color={m.memory.percent>90?"--crit":m.memory.percent>75?"--warn":null} />
+                    <MetricCard label="Network ↓" value={`${m.network.bytes_recv_mb.toFixed(1)} MB/s`}
+                      sub={`${m.network.connections} kết nối`} />
+                    <MetricCard label="Disk"
+                      value={`${m.disk?.[0]?.percent?.toFixed(0) ?? "?"}%`}
+                      sub={m.disk?.[0]?.mountpoint ?? ""}
+                      pct={m.disk?.[0]?.percent}
+                      color={m.disk?.[0]?.percent>90?"--crit":m.disk?.[0]?.percent>80?"--warn":null} />
+                  </div>
+
+                  {/* Sparklines */}
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
+                    {[
+                      { label:"CPU (lịch sử)", key:"cpu",  color:"--purple" },
+                      { label:"Network ↓",     key:"net",  color:"--info"   },
+                    ].map(({ label, key, color }) => (
+                      <div key={key} style={{ background:"var(--bg2)", border:"0.5px solid var(--bdr)",
+                                              borderRadius:"var(--rl)", padding:12 }}>
+                        <div style={{ fontSize:12, fontWeight:500, color:"var(--txt2)", marginBottom:8 }}>{label}</div>
+                        <Spark data={history[selected]?.[key]} color={color} />
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Process list */}
+                  <div style={{ background:"var(--bg2)", border:"0.5px solid var(--bdr)",
+                                borderRadius:"var(--rl)", padding:12, marginBottom:14 }}>
+                    <div style={{ fontSize:12, fontWeight:500, color:"var(--txt2)", marginBottom:10 }}>
+                      Top process
+                    </div>
+                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                      <thead>
+                        <tr style={{ color:"var(--txt3)" }}>
+                          <td style={{ paddingBottom:6 }}>PID</td>
+                          <td>Name</td>
+                          <td style={{ textAlign:"right" }}>CPU%</td>
+                          <td style={{ textAlign:"right" }}>MEM%</td>
+                          <td style={{ textAlign:"right" }}>User</td>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(m.processes || []).slice(0,8).map(p => (
+                          <tr key={p.pid} style={{ borderTop:"0.5px solid var(--bdr)" }}>
+                            <td style={{ padding:"5px 0", color:"var(--txt3)" }}>{p.pid}</td>
+                            <td style={{ fontFamily:"monospace" }}>{p.name.slice(0,22)}</td>
+                            <td style={{ textAlign:"right",
+                                         color: p.cpu_pct>50?"var(--crit)":p.cpu_pct>20?"var(--warn)":"inherit" }}>
+                              {p.cpu_pct.toFixed(1)}
+                            </td>
+                            <td style={{ textAlign:"right" }}>{p.mem_pct.toFixed(1)}</td>
+                            <td style={{ textAlign:"right", color:"var(--txt3)" }}>{p.user?.slice(0,12)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Security */}
+                  {m.security && (
+                    <div style={{ background: m.security.brute_force ? "var(--bg)" : "var(--bg2)",
+                                  border: `0.5px solid ${m.security.brute_force ? "var(--crit)" : "var(--bdr)"}`,
+                                  borderRadius:"var(--rl)", padding:12 }}>
+                      <div style={{ fontSize:12, fontWeight:500, marginBottom:8,
+                                    color: m.security.brute_force?"var(--crit)":"var(--txt2)" }}>
+                        {m.security.brute_force ? "⚠ Brute force phát hiện" : "Bảo mật"}
+                      </div>
+                      <div style={{ color:"var(--txt2)" }}>
+                        Login thất bại / 60s: <b style={{ color: m.security.recent_fails_60s>5?"var(--crit)":"inherit" }}>
+                          {m.security.recent_fails_60s}
+                        </b>
+                      </div>
+                      {(m.security.entries || []).slice(0,5).map((e,i) => (
+                        <div key={i} style={{ fontFamily:"monospace", fontSize:11,
+                                              color:"var(--txt3)", marginTop:4,
+                                              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {e.raw || JSON.stringify(e)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
+                              height:"50vh", color:"var(--txt3)" }}>
+                  {connected ? "Chọn máy chủ từ thanh bên" : "Đang kết nối WebSocket..."}
+                </div>
+              )}
+            </>
+          ) : activeTab === "docker" ? (
+            /* Tab Docker */
+            <DockerPanel host={selected} docker={selData?.metrics?.docker} />
+          ) : activeTab === "ops" ? (
+            /* Tab Ops — Phase 1+2+3 features */
+            <OpsTab hosts={hosts} />
+          ) : (
+            /* Tab Alerts */
+            <div>
+              <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+                {["all","critical","warning","info"].map(f => (
+                  <button key={f} style={{ padding:"4px 12px", borderRadius:7,
+                                           border:"0.5px solid var(--bdr2)",
+                                           background:"var(--bg2)", color:"var(--txt2)" }}>
+                    {f.charAt(0).toUpperCase()+f.slice(1)}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {alerts.slice(0,30).map((a,i) => (
+                  <div key={i} style={{ background:"var(--bg2)",
+                                        border:`0.5px solid var(--bdr)`,
+                                        borderLeft:`3px solid var(${sev(a.severity)})`,
+                                        borderRadius:"var(--r)", padding:"10px 14px",
+                                        display:"flex", gap:12, alignItems:"flex-start" }}>
+                    <div style={{ minWidth:70, color:`var(${sev(a.severity)})`, fontSize:11, fontWeight:500 }}>
+                      {sevLabel(a.severity)}
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontWeight:500 }}>{a.host} — {a.type}</div>
+                      <div style={{ color:"var(--txt2)", marginTop:2, fontSize:12 }}>{a.detail}</div>
+                    </div>
+                    <div style={{ color:"var(--txt3)", fontSize:11, whiteSpace:"nowrap" }}>
+                      {a.timestamp?.slice(0,16).replace("T"," ")}
+                    </div>
+                  </div>
+                ))}
+                {alerts.length === 0 && (
+                  <div style={{ textAlign:"center", color:"var(--txt3)", padding:40 }}>
+                    Chưa có cảnh báo nào
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Root với Auth Gate ────────────────────────── */
+function Root() {
+  const [user, setUser]   = useState(getStoredUser());
+  const [token, setToken] = useState(getStoredToken());
+
+  const handleLogin = (u, t) => { setUser(u); setToken(t); };
+
+  const handleLogout = async () => {
+    await fetch(`${API}/api/auth/logout`, { method: "POST" }).catch(()=>{});
+    localStorage.removeItem("sw_jwt");
+    localStorage.removeItem("sw_user");
+    setUser(null); setToken("");
+  };
+
+  if (!user || !token) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
+  return <App user={user} onLogout={handleLogout} />;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
+</script>
+</body>
+</html>
