@@ -1,50 +1,50 @@
 # ServerWatch
 
-> Lightweight **self-hosted** server monitoring — one server + many agents + realtime dashboard, with Telegram/Email alerting.
+> Hệ thống giám sát server **self-hosted** gọn nhẹ — một server + nhiều agent + dashboard realtime, cảnh báo qua Telegram/Email.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg)](https://docs.docker.com/compose/)
 
-🇻🇳 [Phiên bản tiếng Việt](README.md)
+🇬🇧 [English version](README.md)
 
 ---
 
-## ✨ Features
+## ✨ Tính năng
 
-### Collection (Agent — cross-platform Linux/Windows)
-- **CPU / RAM / Disk / Network** — total + per-core usage, load average, IO rate
-- **Processes & Open ports** — top processes, port scan baseline
-- **Docker containers** — status, restart count, logs, per-container resources
-- **Topology** — detect outbound connections
-- **Batch sending** — 6 samples/min to save bandwidth
+### Thu thập (Agent — cross-platform Linux/Windows)
+- **CPU / RAM / Disk / Network** — usage tổng + per-core, load average, IO rate
+- **Process & Open ports** — top processes, port scan baseline
+- **Docker containers** — status, restart count, logs, resource per container
+- **Topology** — phát hiện kết nối ra ngoài (outbound IPs)
+- **Batch gửi** — gộp 6 sample/phút giảm bandwidth
 
 ### Server (FastAPI + SQLite)
-- **Time-series ring-buffer** in SQLite (no InfluxDB required)
-- **JWT auth** + RBAC user/admin, password change, user management
-- **WebSocket** realtime metrics push to dashboard
-- **REST API** with 50+ endpoints
-- **Backup** SQLite + audit dir tarball, verify, configurable retention
+- **Time-series ring-buffer** trong SQLite (không cần InfluxDB)
+- **JWT auth** + RBAC user/admin, đổi password, quản lý user
+- **WebSocket** push metrics realtime cho dashboard
+- **REST API** đầy đủ (50+ endpoints)
+- **Backup** SQLite + audit dir tarball, verify, retention configurable
 
-### Anomaly detection
-- **Z-score sliding window** — no ML library needed
-- **Port scan detector**
+### Phát hiện bất thường
+- **Anomaly detection** — Z-score sliding window (không cần ML library)
+- **Port scan detector** — phát hiện dò port hàng loạt
 - **Synthetic monitors** — SSL cert expiry, WHOIS domain expiry, HTTP/TCP probes
 
-### Alerting
+### Cảnh báo
 - **Telegram bot** + **Email SMTP**
-- **Dedup + silence + auto-resolve** — anti alert-flood
-- **Acknowledge** from dashboard or API
+- **Dedup + silence + auto-resolve** — chống alert flood
+- **Acknowledge** từ dashboard hoặc API
 
 ### Dashboard
-- **Single-file HTML** — no npm build required
-- **Multi-host sidebar** — quickly switch between servers
-- **Realtime charts** via WebSocket
+- **Single-file HTML** — không cần npm build
+- **Sidebar đa-host** — switch nhanh giữa các server
+- **Charts realtime** qua WebSocket
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ Kiến trúc
 
 ```
 ┌─────────────────┐         metrics POST          ┌──────────────────────┐
@@ -74,25 +74,25 @@
 
 ## 🚀 Quick start
 
-### Requirements
+### Yêu cầu
 - Docker + Docker Compose v2
-- Ubuntu 20.04+ / Debian 11+ (server) — Windows is fine for agent
-- (Optional) Domain + SSL cert if you want to expose dashboard publicly
+- Ubuntu 20.04+ / Debian 11+ (server) — Windows cũng chạy được agent
+- (Tuỳ chọn) Domain + SSL cert nếu muốn expose dashboard public
 
-### One-command deploy
+### 1 lệnh deploy với Docker Compose
 
 ```bash
 git clone https://github.com/baongockyty2404/serverwatch-lean.git
 cd serverwatch-lean
 
-# Create .env from template, fill in tokens/passwords
+# Tạo .env từ template và điền token/password
 cp .env.example .env
 nano .env
 
-# Generate a random 64-char SECRET_TOKEN
+# Sinh SECRET_TOKEN ngẫu nhiên 64 ký tự
 openssl rand -hex 32
 
-# Create external network (one-time)
+# Tạo network external (1 lần)
 docker network create web-proxy
 
 # Deploy
@@ -100,9 +100,9 @@ chmod +x deploy.sh
 ./deploy.sh --full
 ```
 
-Open `https://YOUR_DOMAIN` → log in with `ADMIN_EMAIL` / `ADMIN_PASSWORD` from `.env`.
+Mở `https://YOUR_DOMAIN` → login với `ADMIN_EMAIL` / `ADMIN_PASSWORD` đã đặt trong `.env`.
 
-### Install agent on another server
+### Cài agent trên server khác
 
 ```bash
 pip install psutil requests
@@ -112,58 +112,58 @@ python3 agent.py \
     --interval 10
 ```
 
-Or use the systemd template: [`serverwatch-agent.service`](serverwatch-agent.service)
+Hoặc dùng systemd service mẫu: [`serverwatch-agent.service`](serverwatch-agent.service)
 
 ---
 
-## ⚙️ Key configuration (`.env`)
+## ⚙️ Cấu hình quan trọng (`.env`)
 
-| Variable | Description |
+| Biến | Mô tả |
 |---|---|
-| `SECRET_TOKEN` | Agent ↔ server token (random 64 chars) |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Dashboard admin account |
-| `JWT_SECRET` | JWT secret (empty = reuse `SECRET_TOKEN`) |
-| `ALLOWED_ORIGINS` | CORS allowed domains |
-| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Telegram alerts |
-| `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | Email alerts |
-| `METRICS_RETENTION_HOURS` | Metrics retention (default 48h) |
-| `BACKUP_HOUR_UTC` | Auto-backup hour (UTC) |
+| `SECRET_TOKEN` | Token agent ↔ server (64 ký tự ngẫu nhiên) |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Tài khoản admin dashboard |
+| `JWT_SECRET` | Secret JWT (để trống = dùng `SECRET_TOKEN`) |
+| `ALLOWED_ORIGINS` | Domain được phép CORS |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Cảnh báo qua Telegram |
+| `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | Cảnh báo qua email |
+| `METRICS_RETENTION_HOURS` | Giữ metrics bao lâu (mặc định 48h) |
+| `BACKUP_HOUR_UTC` | Giờ chạy backup tự động (UTC) |
 
-See full list in [`.env.example`](.env.example).
-
----
-
-## 🛡️ Security
-
-- **Rotate `SECRET_TOKEN`** before deploying (`openssl rand -hex 32`)
-- Bind only to `127.0.0.1:8800` — expose through HTTPS reverse proxy
-- Use `fail2ban` to block SSH brute force
-- Rotate tokens every 3 months
+Xem đầy đủ trong [`.env.example`](.env.example).
 
 ---
 
-## 🛠️ Tech stack
+## 🛡️ Bảo mật
+
+- **Đổi `SECRET_TOKEN` ngay** trước khi deploy (`openssl rand -hex 32`)
+- Chỉ bind nội bộ `127.0.0.1:8800` — expose qua reverse proxy HTTPS
+- Dùng `fail2ban` chặn brute force SSH
+- Rotate token định kỳ 3 tháng
+
+---
+
+## 🛠️ Stack công nghệ
 
 - **Backend**: Python 3.12, FastAPI, SQLite (WAL mode), aiohttp
 - **Agent**: psutil, requests, threading (cross-platform)
-- **Frontend**: Vanilla JS + Chart.js (CDN), no build step
+- **Frontend**: Vanilla JS + Chart.js (CDN), không build step
 - **Deploy**: Docker multi-stage, systemd, nginx reverse proxy
 - **Notification**: Telegram Bot API, SMTP
 
 ---
 
-## 🤝 Contributing
+## 🤝 Đóng góp
 
-PRs and issues welcome! Areas that need help:
-- Split `server.py` (1500 lines) into a `server/` package
-- Add a test suite (`pytest` + endpoint smoke tests)
+PR / Issue đều welcome! Một vài hướng đang cần:
+- Tách `server.py` (1500 dòng) thành package `server/`
+- Thêm test suite (`pytest` + smoke test endpoints)
 - GitHub Actions: lint (`ruff`) + build Docker image
-- English translation of detailed docs
+- README song ngữ Anh chi tiết hơn
 
 ---
 
 ## 📜 License
 
-MIT — see [LICENSE](LICENSE).
+MIT — xem [LICENSE](LICENSE).
 
 Copyright © 2026 [baongockyty2404](https://github.com/baongockyty2404)
