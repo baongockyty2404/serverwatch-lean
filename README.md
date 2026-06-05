@@ -9,6 +9,8 @@
 
 🇻🇳 [Phiên bản tiếng Việt](README.vi.md)
 
+![Dashboard overview](image/dashboard.jpg)
+
 ---
 
 ## ✨ Features
@@ -41,6 +43,33 @@
 - **Single-file HTML** — no npm build required
 - **Multi-host sidebar** — quickly switch between servers
 - **Realtime charts** via WebSocket
+
+---
+
+## 📸 Screenshots
+
+<table>
+  <tr>
+    <td width="50%">
+      <b>Docker containers</b><br>
+      <sub>Per-container CPU/Memory, status, restart count, log errors</sub><br>
+      <img src="image/docker.jpg" alt="Docker tab" />
+    </td>
+    <td width="50%">
+      <b>Active alerts</b><br>
+      <sub>Anomaly detection (CPU/network Z-score), dedup, acknowledge</sub><br>
+      <img src="image/alerts.jpg" alt="Alerts tab" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <b>Settings UI</b><br>
+      <sub>SMTP, Telegram, monitoring thresholds — editable from the browser</sub><br>
+      <img src="image/settings.jpg" alt="Settings tab" />
+    </td>
+    <td width="50%">&nbsp;</td>
+  </tr>
+</table>
 
 ---
 

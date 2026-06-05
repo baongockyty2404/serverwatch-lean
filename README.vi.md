@@ -9,6 +9,8 @@
 
 🇬🇧 [English version](README.md)
 
+![Dashboard overview](image/dashboard.jpg)
+
 ---
 
 ## ✨ Tính năng
@@ -41,6 +43,33 @@
 - **Single-file HTML** — không cần npm build
 - **Sidebar đa-host** — switch nhanh giữa các server
 - **Charts realtime** qua WebSocket
+
+---
+
+## 📸 Ảnh chụp màn hình
+
+<table>
+  <tr>
+    <td width="50%">
+      <b>Docker containers</b><br>
+      <sub>CPU/Memory từng container, trạng thái, số lần restart, lỗi trong log</sub><br>
+      <img src="image/docker.jpg" alt="Tab Docker" />
+    </td>
+    <td width="50%">
+      <b>Cảnh báo (Active alerts)</b><br>
+      <sub>Phát hiện bất thường (Z-score CPU/network), dedup, acknowledge</sub><br>
+      <img src="image/alerts.jpg" alt="Tab Alerts" />
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <b>Settings UI</b><br>
+      <sub>SMTP, Telegram, ngưỡng monitor — chỉnh từ trình duyệt, không cần SSH</sub><br>
+      <img src="image/settings.jpg" alt="Tab Settings" />
+    </td>
+    <td width="50%">&nbsp;</td>
+  </tr>
+</table>
 
 ---
 

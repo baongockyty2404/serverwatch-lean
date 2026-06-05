@@ -823,12 +823,28 @@ async def receive_metrics(request: Request):
     host    = body.get("host", "unknown")
     metrics = body.get("metrics", {})
 
+    # Validate payload structure trước khi đăng ký host.
+    # Tránh "ghost host" — POST partial payload làm crash metrics_ts.write
+    # nhưng vẫn để lại row trong table hosts.
+    if not isinstance(host, str) or not host or host == "unknown":
+        raise HTTPException(status_code=422, detail="missing or invalid 'host'")
+    if not isinstance(metrics, dict) or not metrics:
+        raise HTTPException(status_code=422, detail="missing or empty 'metrics'")
+
     payload_copy = {k: v for k, v in body.items() if k != "checksum"}
     expected_cs = hashlib.sha256(
         json.dumps(payload_copy, sort_keys=True).encode()
     ).hexdigest()
     if body.get("checksum") != expected_cs:
         log.warning("Checksum không khớp từ host %s", host)
+
+    # Lưu time-series vào SQLite TRƯỚC khi register host. Nếu write fail
+    # (payload malformed) → 422 ngay, không để lại ghost host trên dashboard.
+    try:
+        metrics_ts.write(DB_PATH, host, metrics)
+    except Exception as e:
+        log.error("metrics_ts.write error cho host %s: %s", host, e)
+        raise HTTPException(status_code=422, detail=f"invalid metrics payload: {e}")
 
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
@@ -837,12 +853,6 @@ async def receive_metrics(request: Request):
     )
     conn.commit()
     conn.close()
-
-    # Lưu time-series vào SQLite
-    try:
-        metrics_ts.write(DB_PATH, host, metrics)
-    except Exception as e:
-        log.error("metrics_ts.write error: %s", e)
 
     alerts = rule_engine.evaluate(host, metrics)
     anomalies = anomaly_detector.analyze(host, metrics)

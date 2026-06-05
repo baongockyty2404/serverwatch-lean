@@ -59,7 +59,12 @@ log = logging.getLogger("agent")
 
 IS_WINDOWS = platform.system() == "Windows"
 IS_LINUX   = platform.system() == "Linux"
-HOSTNAME   = socket.gethostname()
+# HOSTNAME mặc định = OS hostname. Có thể override bằng:
+#   1. CLI flag: --hostname <name>
+#   2. Env var:  SW_HOSTNAME=<name>
+# Hữu ích khi 2 server có cùng OS hostname (clone VPS template) — tránh ghi
+# đè cùng row DB trên dashboard.
+HOSTNAME   = os.getenv("SW_HOSTNAME") or socket.gethostname()
 OS_NAME    = platform.system() + " " + platform.release()
 
 
@@ -598,10 +603,10 @@ class LocalThreatDetector:
 # PAYLOAD & GỬI DỮ LIỆU
 # ══════════════════════════════════════════════════════════════════════════════
 
-def build_payload(metrics: dict) -> dict:
+def build_payload(metrics: dict, hostname: str = HOSTNAME) -> dict:
     """Đóng gói payload có checksum để server verify."""
     payload = {
-        "host":      HOSTNAME,
+        "host":      hostname,
         "os":        OS_NAME,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "metrics":   metrics,
@@ -615,18 +620,39 @@ class DataSender:
     """
     Gửi payload về server, có buffer local nếu mất kết nối.
     Khi kết nối lại, tự động gửi queue tồn đọng.
+
+    Tự động recreate Session sau 5 lần fail liên tiếp — phòng trường hợp
+    keep-alive connection bị stale (urllib3 không tự invalidate dead conn).
     """
 
-    def __init__(self, server_url: str, token: str):
-        self.url    = server_url.rstrip("/") + "/api/metrics"
-        self.token  = token
+    SESSION_RESET_THRESHOLD = 5
+
+    def __init__(self, server_url: str, token: str, hostname: str):
+        self.url      = server_url.rstrip("/") + "/api/metrics"
+        self.token    = token
+        self.hostname = hostname
         self.queue: deque = deque(maxlen=500)   # buffer tối đa 500 bản tin
+        self.consecutive_failures = 0
+        self._build_session()
+
+    def _build_session(self):
         self.session = requests.Session()
         self.session.headers.update({
-            "Authorization": f"Bearer {token}",
+            "Authorization": f"Bearer {self.token}",
             "Content-Type":  "application/json",
-            "X-Agent-Host":  HOSTNAME,
+            "X-Agent-Host":  self.hostname,
         })
+
+    def _reset_session_if_stuck(self):
+        if self.consecutive_failures >= self.SESSION_RESET_THRESHOLD:
+            log.warning("Đã fail %d lần liên tiếp — recreate HTTP session",
+                        self.consecutive_failures)
+            try:
+                self.session.close()
+            except Exception:
+                pass
+            self._build_session()
+            self.consecutive_failures = 0
 
     def send(self, payload: dict) -> dict | None:
         # Gửi queue tồn đọng trước
@@ -647,13 +673,19 @@ class DataSender:
                 timeout=15,
             )
             if r.status_code == 200:
+                self.consecutive_failures = 0
                 return r.json()
             log.warning("Server trả về %d", r.status_code)
+            self.consecutive_failures += 1
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             log.warning("Mất kết nối / timeout đến server — buffer payload")
             self.queue.append(payload)
+            self.consecutive_failures += 1
         except Exception as e:
             log.error("Lỗi gửi dữ liệu: %s", e)
+            self.consecutive_failures += 1
+
+        self._reset_session_if_stuck()
         return None
 
 
@@ -733,14 +765,18 @@ def collect_topology() -> dict:
 # VÒNG LẶP CHÍNH
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run(server_url: str, token: str, interval: int):
-    log.info("ServerWatch Agent khởi động — host=%s  server=%s", HOSTNAME, server_url)
+def run(server_url: str, token: str, interval: int, hostname: str):
+    log.info("ServerWatch Agent khởi động — host=%s  server=%s", hostname, server_url)
 
     docker_collector = DockerCollector()
     threat_det       = LocalThreatDetector()
-    sender           = DataSender(server_url, token)
+    sender           = DataSender(server_url, token, hostname)
 
-    iter_count = 0
+    iter_count   = 0
+    success_cnt  = 0
+    last_summary = time.time()
+    # Cứ ~5 phút log 1 dòng INFO tổng kết để user biết agent đang hoạt động.
+    SUMMARY_INTERVAL_SEC = 300
 
     # Khởi động cpu_percent (lần đầu trả 0.0)
     psutil.cpu_percent(interval=None)
@@ -772,9 +808,20 @@ def run(server_url: str, token: str, interval: int):
                                 t["severity"].upper(), t["type"], t["detail"])
 
             # Đóng gói và gửi
-            payload = build_payload(metrics)
+            payload = build_payload(metrics, hostname)
             response = sender.send(payload)
-            log.debug("Gửi payload %s", "OK" if response else "QUEUED")
+            if response:
+                success_cnt += 1
+
+            # Định kỳ log heartbeat — đỡ user phải đoán "agent có chạy không"
+            now = time.time()
+            if now - last_summary >= SUMMARY_INTERVAL_SEC:
+                log.info("Heartbeat: gửi %d sample thành công trong %ds qua "
+                         "(queue=%d, fails liên tiếp=%d)",
+                         success_cnt, int(now - last_summary),
+                         len(sender.queue), sender.consecutive_failures)
+                success_cnt = 0
+                last_summary = now
 
         except Exception as e:
             log.error("Lỗi thu thập: %s", e, exc_info=True)
@@ -797,9 +844,14 @@ def main():
                         help="Bearer token xác thực")
     parser.add_argument("--interval", type=int, default=DEFAULT_INTERVAL,
                         help="Chu kỳ thu thập (giây)")
+    parser.add_argument("--hostname", default=None,
+                        help="Override hostname báo cáo (mặc định: SW_HOSTNAME env "
+                             "hoặc socket.gethostname()). Dùng khi 2 server cùng "
+                             "OS hostname để tránh ghi đè cùng row DB.")
     args = parser.parse_args()
 
-    run(args.server, args.token, args.interval)
+    hostname = args.hostname or HOSTNAME
+    run(args.server, args.token, args.interval, hostname)
 
 
 if __name__ == "__main__":

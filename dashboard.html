@@ -1117,11 +1117,28 @@ function App({ user, onLogout }) {
                       color={m.memory.percent>90?"--crit":m.memory.percent>75?"--warn":null} />
                     <MetricCard label="Network ↓" value={`${m.network.bytes_recv_mb.toFixed(1)} MB/s`}
                       sub={`${m.network.connections} kết nối`} />
-                    <MetricCard label="Disk"
-                      value={`${m.disk?.[0]?.percent?.toFixed(0) ?? "?"}%`}
-                      sub={m.disk?.[0]?.mountpoint ?? ""}
-                      pct={m.disk?.[0]?.percent}
-                      color={m.disk?.[0]?.percent>90?"--crit":m.disk?.[0]?.percent>80?"--warn":null} />
+                    {(() => {
+                      // Chọn partition đầy nhất để hiển thị card chính, kèm GB
+                      // sub-line. Nếu có nhiều partitions, render danh sách bên dưới.
+                      const disks = m.disk || [];
+                      const main  = disks.reduce(
+                        (acc, d) => (d?.percent ?? 0) > (acc?.percent ?? -1) ? d : acc,
+                        null
+                      );
+                      const pct = main?.percent;
+                      const sub = main
+                        ? `${main.used_gb?.toFixed?.(1) ?? main.used_gb} / `
+                          + `${main.total_gb?.toFixed?.(1) ?? main.total_gb} GB`
+                          + ` · ${main.mountpoint}`
+                        : "";
+                      return (
+                        <MetricCard label="Disk"
+                          value={`${pct?.toFixed(0) ?? "?"}%`}
+                          sub={sub}
+                          pct={pct}
+                          color={pct>90?"--crit":pct>80?"--warn":null} />
+                      );
+                    })()}
                   </div>
 
                   {/* Sparklines */}
