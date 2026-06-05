@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -42,6 +42,229 @@ const _ws   = `${_loc.protocol === "https:" ? "wss:" : "ws:"}//${_loc.host}/ws`;
 const API   = (window.SW_API   || _base);
 const WS_BASE = (window.SW_WS || _ws);
 
+/* ══════════════════════════════════════════════════════════════════
+   i18n — EN (default) / VI. Switch lưu vào localStorage + reload.
+   Lý do reload thay vì re-render: t() được gọi từ class component,
+   non-React handlers (alert/confirm), và default arg của Tbl → Context
+   bị bypass. Reload đơn giản, hiệu năng OK cho admin dashboard.
+   ══════════════════════════════════════════════════════════════════ */
+const I18N = {
+  en: {
+    /* common */
+    save: "Save", delete: "Delete", reset: "reset", run: "Run",
+    add: "+ Add", create: "+ Create", cancel: "Cancel",
+    loading: "Loading…", saving: "Saving…",
+    no_data: "No data yet", error: "Error", logout: "Sign out",
+    /* login */
+    login_subtitle: "Sign in to continue", email: "Email", password: "Password",
+    signing_in: "Signing in…", sign_in: "Sign in",
+    login_failed: "Login failed", cant_connect: "Cannot reach server",
+    /* tabs */
+    tab_dashboard: "Dashboard", tab_docker: "Docker",
+    tab_alerts: "Alerts", tab_ops: "Ops",
+    /* sidebar / status */
+    servers: "SERVERS", online: "online", connecting: "Connecting…",
+    select_server: "Select a server from the sidebar",
+    connecting_ws: "Connecting WebSocket…",
+    /* metric cards */
+    cpu: "CPU", ram: "RAM", disk: "Disk", network_down: "Network ↓",
+    cores: "cores", connections: "connections",
+    cpu_history: "CPU (history)",
+    top_process: "Top processes",
+    /* docker */
+    docker_unavailable: "Docker not available on this host",
+    total_containers: "Total containers",
+    running: "Running", stopped: "Stopped",
+    unhealthy: "Unhealthy", restarting: "Restarting",
+    no_containers: "No containers",
+    show_logs: "Show logs", hide_logs: "Hide logs",
+    log_errors_suffix: "log errors detected",
+    dangerous_activity: "Dangerous activity detected:",
+    recent_errors: "Recent errors:", recent_logs: "Recent logs:",
+    no_log: "No log",
+    /* alerts */
+    no_alerts: "No alerts yet", no_firing: "✅ No alerts firing",
+    /* silences */
+    silences_active: "Silences active",
+    host_pattern_hint: "host pattern (* or name)",
+    type_pattern_hint: "type pattern",
+    duration_hint: "30m / 2h / 1d",
+    reason: "reason",
+    no_silence: "No silence",
+    duration_invalid: "Duration: 30m, 2h, 1d",
+    create_silence: "+ Create silence",
+    col_host: "Host", col_type: "Type", col_sev: "Sev",
+    col_detail: "Detail", col_count: "Hits", col_last_seen: "Last seen",
+    col_ack: "Ack",
+    col_expires: "Expires", col_by: "By", col_reason: "Reason",
+    col_kind: "Kind", col_target: "Target", col_interval: "Interval",
+    col_status: "Status", col_last: "Last",
+    col_email: "Email", col_name: "Name", col_role: "Role",
+    col_created: "Created", col_last_login: "Last login",
+    col_file: "File", col_when: "When", col_size: "Size",
+    col_sqlite_rows: "SQLite rows", col_audit: "Audit", col_actions: "Actions",
+    /* monitors */
+    enter_target: "Enter target",
+    no_monitor: "No monitors — add cert/domain/http/tcp",
+    delete_monitor_confirm: "Delete monitor?",
+    /* users */
+    email_password_required: "Email + password required",
+    no_user: "No users",
+    create_user: "+ Create user",
+    delete_user_confirm: "Delete user?",
+    name_hint: "name",
+    /* settings */
+    settings_title: "Settings — runtime config (no restart needed)",
+    no_change: "No changes",
+    saved_count: "✓ Saved {n} settings",
+    save_errors: "Saved {n}, errors: {e}",
+    test_telegram: "📨 Test Telegram",
+    test_email: "✉ Test Email",
+    save_btn: "💾 Save",
+    sending_telegram: "Sending Telegram test…",
+    sending_email: "Sending email test…",
+    telegram_sent: "✓ Test sent — check Telegram",
+    email_sent: "✓ Test email sent",
+    reset_confirm: "Delete override for {key}? Will fall back to ENV/default.",
+    priority_note: "Priority: DB (edit here) → ENV (.env) → default. Server reads new cache within 15s.",
+    /* backup */
+    backup_now: "Backup now",
+    backup_running: "🔄 running…",
+    delete_backup_confirm: "Delete {name}?",
+    no_backup: "No backups — click 'Backup now' or wait for UTC 19:00 cron",
+    backup_dir_note: "Dir: {dir} · Each backup = SQLite + audit logs, HMAC-signed.",
+    last_error: "⚠ Previous error:",
+    last_success: "✓ Latest:",
+    retention: "retention",
+    /* security card */
+    brute_force_detected: "⚠ Brute force detected",
+    security: "Security",
+    failed_logins_60s: "Failed logins / 60s:",
+    /* misc */
+    panel_runtime_error: "Panel {n} runtime error",
+    acknowledge_confirm: "Acknowledge alert?",
+  },
+  vi: {
+    save: "Lưu", delete: "Xoá", reset: "reset", run: "Run",
+    add: "+ Thêm", create: "+ Tạo", cancel: "Huỷ",
+    loading: "Đang tải…", saving: "Đang lưu…",
+    no_data: "Chưa có dữ liệu", error: "Lỗi", logout: "Đăng xuất",
+    login_subtitle: "Đăng nhập để tiếp tục", email: "Email", password: "Mật khẩu",
+    signing_in: "Đang đăng nhập…", sign_in: "Đăng nhập",
+    login_failed: "Đăng nhập thất bại", cant_connect: "Không kết nối được server",
+    tab_dashboard: "Tổng quan", tab_docker: "Docker",
+    tab_alerts: "Cảnh báo", tab_ops: "Vận hành",
+    servers: "MÁY CHỦ", online: "đang chạy", connecting: "Đang kết nối…",
+    select_server: "Chọn máy chủ từ thanh bên",
+    connecting_ws: "Đang kết nối WebSocket…",
+    cpu: "CPU", ram: "RAM", disk: "Disk", network_down: "Mạng ↓",
+    cores: "lõi", connections: "kết nối",
+    cpu_history: "CPU (lịch sử)",
+    top_process: "Top tiến trình",
+    docker_unavailable: "Docker không khả dụng trên host này",
+    total_containers: "Tổng container",
+    running: "Đang chạy", stopped: "Dừng",
+    unhealthy: "Không khoẻ", restarting: "Đang restart",
+    no_containers: "Không có container nào",
+    show_logs: "Xem logs", hide_logs: "Ẩn logs",
+    log_errors_suffix: "lỗi phát hiện trong log",
+    dangerous_activity: "Hành vi nguy hiểm phát hiện:",
+    recent_errors: "Lỗi gần đây:", recent_logs: "Log gần nhất:",
+    no_log: "Không có log",
+    no_alerts: "Chưa có cảnh báo", no_firing: "✅ Không có alert đang firing",
+    silences_active: "Silence đang áp dụng",
+    host_pattern_hint: "host pattern (* hoặc tên)",
+    type_pattern_hint: "type pattern",
+    duration_hint: "30m / 2h / 1d",
+    reason: "lý do",
+    no_silence: "Không có silence",
+    duration_invalid: "Duration: 30m, 2h, 1d",
+    create_silence: "+ Tạo silence",
+    col_host: "Host", col_type: "Type", col_sev: "Mức",
+    col_detail: "Chi tiết", col_count: "Số lần", col_last_seen: "Lần cuối",
+    col_ack: "Ack",
+    col_expires: "Hết hạn", col_by: "Bởi", col_reason: "Lý do",
+    col_kind: "Loại", col_target: "Target", col_interval: "Chu kỳ",
+    col_status: "Trạng thái", col_last: "Lần cuối",
+    col_email: "Email", col_name: "Tên", col_role: "Quyền",
+    col_created: "Tạo lúc", col_last_login: "Login gần nhất",
+    col_file: "File", col_when: "Lúc", col_size: "Size",
+    col_sqlite_rows: "SQLite rows", col_audit: "Audit", col_actions: "Hành động",
+    enter_target: "Nhập target",
+    no_monitor: "Chưa có monitor — tạo cert/domain/http/tcp",
+    delete_monitor_confirm: "Xoá monitor?",
+    email_password_required: "Cần email và password",
+    no_user: "Chưa có user",
+    create_user: "+ Tạo user",
+    delete_user_confirm: "Xoá user?",
+    name_hint: "tên",
+    settings_title: "Settings — cấu hình runtime (không cần restart)",
+    no_change: "Không có thay đổi",
+    saved_count: "✓ Đã lưu {n} setting",
+    save_errors: "Lưu {n}, lỗi: {e}",
+    test_telegram: "📨 Test Telegram",
+    test_email: "✉ Test Email",
+    save_btn: "💾 Lưu",
+    sending_telegram: "Đang gửi test Telegram…",
+    sending_email: "Đang gửi test email…",
+    telegram_sent: "✓ Đã gửi — kiểm tra Telegram",
+    email_sent: "✓ Đã gửi email test",
+    reset_confirm: "Xoá override cho {key}? Sẽ fallback về ENV/default.",
+    priority_note: "Thứ tự ưu tiên: DB (sửa ở đây) → ENV (.env) → default. Server đọc cache mới trong 15s.",
+    backup_now: "Backup ngay",
+    backup_running: "🔄 đang chạy…",
+    delete_backup_confirm: "Xoá {name}?",
+    no_backup: "Chưa có backup — click 'Backup ngay' hoặc đợi cron UTC 19:00",
+    backup_dir_note: "Dir: {dir} · Mỗi backup = SQLite + audit logs, ký HMAC.",
+    last_error: "⚠ Lỗi lần trước:",
+    last_success: "✓ Lần gần nhất:",
+    retention: "giữ",
+    brute_force_detected: "⚠ Brute force phát hiện",
+    security: "Bảo mật",
+    failed_logins_60s: "Login thất bại / 60s:",
+    panel_runtime_error: "Panel {n} bị lỗi runtime",
+    acknowledge_confirm: "Acknowledge alert?",
+  },
+};
+
+function detectLang() {
+  const saved = localStorage.getItem("sw_lang");
+  if (saved && I18N[saved]) return saved;
+  return (navigator.language || "en").toLowerCase().startsWith("vi") ? "vi" : "en";
+}
+const LANG = detectLang();
+// Sync <html lang> với i18n để screen reader + browser autotranslate hiểu đúng
+document.documentElement.lang = LANG;
+function t(key, vars) {
+  let s = (I18N[LANG] && I18N[LANG][key]) || I18N.en[key] || key;
+  if (vars) for (const k in vars) s = s.replace(`{${k}}`, vars[k]);
+  return s;
+}
+function setLang(next) {
+  if (!I18N[next]) return;
+  localStorage.setItem("sw_lang", next);
+  window.location.reload();
+}
+
+function LangSwitch() {
+  // Compact toggle EN ⇄ VI ở topbar. Click đổi → reload (đơn giản, hiệu năng OK).
+  return (
+    <div style={{ display:"inline-flex", border:"0.5px solid var(--bdr2)",
+                  borderRadius:6, overflow:"hidden", fontSize:11 }}>
+      {["en","vi"].map(L => (
+        <button key={L} onClick={() => setLang(L)}
+          style={{ padding:"3px 8px", border:"none",
+                   background: LANG === L ? "var(--bg3)" : "transparent",
+                   color: LANG === L ? "var(--txt)" : "var(--txt2)",
+                   fontWeight: LANG === L ? 500 : 400,
+                   textTransform: "uppercase", cursor:"pointer" }}>
+          {L}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /* ── Auth state ──────────────────────────────────── */
 function getStoredToken() { return localStorage.getItem("sw_jwt") || ""; }
 function getStoredUser()  { try { return JSON.parse(localStorage.getItem("sw_user") || "null"); } catch { return null; } }
@@ -79,7 +302,7 @@ function LoginScreen({ onLogin }) {
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.detail || "Đăng nhập thất bại");
+        setError(data.detail || t("login_failed"));
         setLoading(false);
         return;
       }
@@ -87,7 +310,7 @@ function LoginScreen({ onLogin }) {
       localStorage.setItem("sw_user", JSON.stringify(data.user));
       onLogin(data.user, data.token);
     } catch (err) {
-      setError("Không kết nối được server");
+      setError(t("cant_connect"));
     }
     setLoading(false);
   };
@@ -102,7 +325,7 @@ function LoginScreen({ onLogin }) {
       }}>
         <div style={{ textAlign:"center", marginBottom:28 }}>
           <div style={{ fontSize:22, fontWeight:600, marginBottom:4 }}>ServerWatch</div>
-          <div style={{ color:"var(--txt2)", fontSize:13 }}>Đăng nhập để tiếp tục</div>
+          <div style={{ color:"var(--txt2)", fontSize:13 }}>{t("login_subtitle")}</div>
         </div>
 
         {error && (
@@ -115,7 +338,7 @@ function LoginScreen({ onLogin }) {
 
         <div style={{ marginBottom:14 }}>
           <label style={{ display:"block", fontSize:12, color:"var(--txt2)",
-                          marginBottom:5, fontWeight:500 }}>Email</label>
+                          marginBottom:5, fontWeight:500 }}>{t("email")}</label>
           <input type="email" value={email} onChange={e => setEmail(e.target.value)}
             required autoFocus placeholder="admin@example.com"
             style={{ width:"100%", padding:"9px 12px", borderRadius:8,
@@ -126,7 +349,7 @@ function LoginScreen({ onLogin }) {
 
         <div style={{ marginBottom:20 }}>
           <label style={{ display:"block", fontSize:12, color:"var(--txt2)",
-                          marginBottom:5, fontWeight:500 }}>Mật khẩu</label>
+                          marginBottom:5, fontWeight:500 }}>{t("password")}</label>
           <input type="password" value={password} onChange={e => setPassword(e.target.value)}
             required placeholder="••••••••"
             style={{ width:"100%", padding:"9px 12px", borderRadius:8,
@@ -139,7 +362,7 @@ function LoginScreen({ onLogin }) {
           style={{ width:"100%", padding:"10px 0", borderRadius:8, border:"none",
                    background:"var(--purple)", color:"#fff", fontSize:13,
                    fontWeight:500, opacity: loading ? 0.7 : 1 }}>
-          {loading ? "Đang đăng nhập..." : "Đăng nhập"}
+          {loading ? t("signing_in") : t("sign_in")}
         </button>
       </form>
     </div>
@@ -228,7 +451,7 @@ function DockerPanel({ host, docker }) {
     return (
       <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
                     height:"50vh", color:"var(--txt3)" }}>
-        {host ? "Docker không khả dụng trên host này" : "Chọn máy chủ từ thanh bên"}
+        {host ? t("docker_unavailable") : t("select_server")}
       </div>
     );
   }
@@ -247,12 +470,12 @@ function DockerPanel({ host, docker }) {
     <div>
       {/* Docker Summary */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:10, marginBottom:14 }}>
-        <MetricCard label="Tổng containers" value={s.total || 0} />
-        <MetricCard label="Running" value={s.running || 0} color="--ok" />
-        <MetricCard label="Stopped" value={s.stopped || 0} color="--txt3" />
-        <MetricCard label="Unhealthy" value={s.unhealthy || 0}
+        <MetricCard label={t("total_containers")} value={s.total || 0} />
+        <MetricCard label={t("running")} value={s.running || 0} color="--ok" />
+        <MetricCard label={t("stopped")} value={s.stopped || 0} color="--txt3" />
+        <MetricCard label={t("unhealthy")} value={s.unhealthy || 0}
           color={s.unhealthy > 0 ? "--crit" : "--ok"} />
-        <MetricCard label="Restarting" value={s.restarting || 0}
+        <MetricCard label={t("restarting")} value={s.restarting || 0}
           color={s.restarting > 0 ? "--warn" : "--ok"} />
       </div>
 
@@ -318,7 +541,7 @@ function DockerPanel({ host, docker }) {
             {/* Error indicators */}
             {c.log_error_count > 0 && (
               <div style={{ fontSize:11, color:"var(--warn)", marginBottom:4 }}>
-                {c.log_error_count} lỗi phát hiện trong log
+                {c.log_error_count} {t("log_errors_suffix")}
               </div>
             )}
 
@@ -327,7 +550,7 @@ function DockerPanel({ host, docker }) {
               <div style={{ background:"rgba(226,75,74,0.1)", border:"0.5px solid var(--crit)",
                             borderRadius:6, padding:8, marginBottom:6 }}>
                 <div style={{ fontSize:11, fontWeight:500, color:"var(--crit)", marginBottom:4 }}>
-                  Hành vi nguy hiểm phát hiện:
+                  {t("dangerous_activity")}
                 </div>
                 {c.dangerous_activity.map((d,i) => (
                   <div key={i} style={{ fontSize:11, fontFamily:"monospace", color:"var(--crit)",
@@ -343,7 +566,7 @@ function DockerPanel({ host, docker }) {
               style={{ fontSize:11, padding:"3px 8px", borderRadius:5,
                        border:"0.5px solid var(--bdr2)", background:"var(--bg3)",
                        color:"var(--txt2)" }}>
-              {expandedLogs === c.name ? "Ẩn logs" : "Xem logs"}
+              {expandedLogs === c.name ? t("hide_logs") : t("show_logs")}
             </button>
 
             {expandedLogs === c.name && (
@@ -352,7 +575,7 @@ function DockerPanel({ host, docker }) {
                 {c.log_errors?.length > 0 && (
                   <div style={{ marginBottom:8 }}>
                     <div style={{ fontSize:11, fontWeight:500, color:"var(--crit)", marginBottom:4 }}>
-                      Lỗi gần đây:
+                      {t("recent_errors")}
                     </div>
                     <div style={{ background:"var(--bg3)", borderRadius:6, padding:8,
                                   maxHeight:150, overflowY:"auto" }}>
@@ -369,7 +592,7 @@ function DockerPanel({ host, docker }) {
                 {/* Recent logs */}
                 <div>
                   <div style={{ fontSize:11, fontWeight:500, color:"var(--txt2)", marginBottom:4 }}>
-                    Log gần nhất:
+                    {t("recent_logs")}
                   </div>
                   <div style={{ background:"var(--bg3)", borderRadius:6, padding:8,
                                 maxHeight:200, overflowY:"auto" }}>
@@ -381,7 +604,7 @@ function DockerPanel({ host, docker }) {
                       </div>
                     ))}
                     {(!c.recent_logs || c.recent_logs.length === 0) && (
-                      <div style={{ fontSize:11, color:"var(--txt3)" }}>Không có log</div>
+                      <div style={{ fontSize:11, color:"var(--txt3)" }}>{t("no_log")}</div>
                     )}
                   </div>
                 </div>
@@ -392,7 +615,7 @@ function DockerPanel({ host, docker }) {
 
         {containers.length === 0 && (
           <div style={{ textAlign:"center", color:"var(--txt3)", padding:40 }}>
-            Không có container nào
+            {t("no_containers")}
           </div>
         )}
       </div>
@@ -437,7 +660,10 @@ function Btn({ onClick, children, color = "--txt2", danger }) {
     }}>{children}</button>
   );
 }
-function Tbl({ cols, rows, empty = "Chưa có dữ liệu" }) {
+function Tbl({ cols, rows, empty }) {
+  // Sử dụng default tại render time để LANG đã sẵn sàng — không thể dùng
+  // default arg expression vì t() chưa init khi prop được destructure.
+  empty = empty != null ? empty : t("no_data");
   if (!rows || rows.length === 0)
     return <div style={{ color:"var(--txt3)", padding:"12px 0", textAlign:"center" }}>{empty}</div>;
   return (
@@ -466,13 +692,14 @@ function StatesPanel() {
   useEffect(() => { reload(); const t = setInterval(reload, 15000); return () => clearInterval(t); }, []);
 
   const ack = (fp) => {
-    if (!confirm("Acknowledge alert?")) return;
+    if (!confirm(t("acknowledge_confirm"))) return;
     authFetch(`${API}/api/oncall/ack/${fp}`, { method:"POST" }).then(reload);
   };
 
   return (
     <Card title={`Active alerts (${data.length})`} action={<Btn onClick={reload}>↻</Btn>}>
-      <Tbl cols={["Host", "Type", "Sev", "Detail", "Lần", "Last seen", "Ack"]}
+      <Tbl cols={[t("col_host"), t("col_type"), t("col_sev"), t("col_detail"),
+                  t("col_count"), t("col_last_seen"), t("col_ack")]}
         rows={data.map(a => [
           a.host,
           <code style={{ fontSize:11 }}>{a.type}</code>,
@@ -484,7 +711,7 @@ function StatesPanel() {
             ? <span style={{ color:"var(--ok)", fontSize:11 }}>✓ {a.ack_by}</span>
             : <Btn onClick={() => ack(a.fingerprint)}>Ack</Btn>,
         ])}
-        empty="✅ Không có alert đang firing" />
+        empty={t("no_firing")} />
     </Card>
   );
 }
@@ -505,7 +732,7 @@ function SilencesPanel() {
 
   const add = () => {
     const dur = parseDur(form.duration);
-    if (!dur) return alert("Duration: 30m, 2h, 1d");
+    if (!dur) return alert(t("duration_invalid"));
     authFetch(`${API}/api/silences`, {
       method: "POST",
       body: JSON.stringify({
@@ -514,30 +741,31 @@ function SilencesPanel() {
       })
     }).then(r=>r.json()).then(d => {
       if (d.id) reload();
-      else alert(d.detail || "Lỗi");
+      else alert(d.detail || t("error"));
     });
   };
 
   const remove = (id) => authFetch(`${API}/api/silences/${id}/remove`, { method:"POST" }).then(reload);
 
   return (
-    <Card title={`Silences active (${data.length})`}>
+    <Card title={`${t("silences_active")} (${data.length})`}>
       <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
-        <input placeholder="host pattern (* hoặc tên)" value={form.host}
+        <input placeholder={t("host_pattern_hint")} value={form.host}
           onChange={e=>setForm({...form, host:e.target.value})}
           style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", width:140 }} />
-        <input placeholder="type pattern" value={form.type}
+        <input placeholder={t("type_pattern_hint")} value={form.type}
           onChange={e=>setForm({...form, type:e.target.value})}
           style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", width:140 }} />
-        <input placeholder="30m / 2h / 1d" value={form.duration}
+        <input placeholder={t("duration_hint")} value={form.duration}
           onChange={e=>setForm({...form, duration:e.target.value})}
           style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", width:80 }} />
-        <input placeholder="lý do" value={form.reason}
+        <input placeholder={t("reason")} value={form.reason}
           onChange={e=>setForm({...form, reason:e.target.value})}
           style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", flex:1, minWidth:120 }} />
-        <Btn onClick={add} color="--ok">+ Tạo silence</Btn>
+        <Btn onClick={add} color="--ok">{t("create_silence")}</Btn>
       </div>
-      <Tbl cols={["#", "Host", "Type", "Hết hạn", "Bởi", "Lý do", ""]}
+      <Tbl cols={["#", t("col_host"), t("col_type"), t("col_expires"),
+                  t("col_by"), t("col_reason"), ""]}
         rows={data.map(s => [
           s.id,
           <code style={{ fontSize:11 }}>{s.host_pattern}</code>,
@@ -545,9 +773,9 @@ function SilencesPanel() {
           fmtTs(s.expires_at),
           <span style={{ fontSize:11, color:"var(--txt3)" }}>{s.created_by}</span>,
           <span style={{ fontSize:11 }}>{s.reason}</span>,
-          <Btn onClick={() => remove(s.id)} danger>Xoá</Btn>,
+          <Btn onClick={() => remove(s.id)} danger>{t("delete")}</Btn>,
         ])}
-        empty="Không có silence" />
+        empty={t("no_silence")} />
     </Card>
   );
 }
@@ -561,15 +789,15 @@ function MonitorsPanel() {
   useEffect(() => { reload(); const t=setInterval(reload, 30000); return ()=>clearInterval(t); }, []);
 
   const add = () => {
-    if (!form.target) return alert("Nhập target");
+    if (!form.target) return alert(t("enter_target"));
     authFetch(`${API}/api/monitors`, {
       method:"POST",
       body: JSON.stringify({ kind: form.kind, target: form.target, interval_sec: parseInt(form.interval) })
-    }).then(r=>r.json()).then(d => { if (d.id) reload(); else alert(d.detail||"Lỗi"); });
+    }).then(r=>r.json()).then(d => { if (d.id) reload(); else alert(d.detail||t("error")); });
   };
   const run = (id) => authFetch(`${API}/api/monitors/${id}/run`, { method:"POST" })
     .then(r=>r.json()).then(d => { alert(`${d.status?.toUpperCase()}: ${d.detail}`); reload(); });
-  const remove = (id) => confirm("Xoá monitor?") &&
+  const remove = (id) => confirm(t("delete_monitor_confirm")) &&
     authFetch(`${API}/api/monitors/${id}/delete`, { method:"POST" }).then(reload);
 
   return (
@@ -587,9 +815,10 @@ function MonitorsPanel() {
           style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", flex:1, minWidth:200 }} />
         <input type="number" value={form.interval} onChange={e=>setForm({...form, interval:e.target.value})}
           style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", width:80 }} />
-        <Btn onClick={add} color="--ok">+ Thêm</Btn>
+        <Btn onClick={add} color="--ok">{t("add")}</Btn>
       </div>
-      <Tbl cols={["#", "Kind", "Target", "Interval", "Status", "Detail", "Last", ""]}
+      <Tbl cols={["#", t("col_kind"), t("col_target"), t("col_interval"),
+                  t("col_status"), t("col_detail"), t("col_last"), ""]}
         rows={data.map(m => [
           m.id,
           <code style={{ fontSize:11 }}>{m.kind}</code>,
@@ -600,7 +829,7 @@ function MonitorsPanel() {
           <span style={{ fontSize:11, color:"var(--txt3)" }}>{fmtTs(m.last_checked)}</span>,
           <span><Btn onClick={()=>run(m.id)}>Run</Btn> <Btn onClick={()=>remove(m.id)} danger>×</Btn></span>,
         ])}
-        empty="Chưa có monitor — tạo cert/domain/http/tcp" />
+        empty={t("no_monitor")} />
     </Card>
   );
 }
@@ -614,17 +843,17 @@ function UsersPanel() {
   useEffect(() => { reload(); }, []);
 
   const add = () => {
-    if (!form.email || !form.password) return alert("Email + password");
+    if (!form.email || !form.password) return alert(t("email_password_required"));
     authFetch(`${API}/api/users`, { method:"POST", body: JSON.stringify(form) })
       .then(r=>r.json()).then(d => {
         if (d.id) { setForm({ email:"", password:"", name:"", role:"viewer" }); reload(); }
-        else alert(d.detail||"Lỗi");
+        else alert(d.detail||t("error"));
       });
   };
   const setRole = (uid, role) => authFetch(`${API}/api/users/${uid}/role`, {
     method:"POST", body: JSON.stringify({ role })
   }).then(reload);
-  const remove = (uid) => confirm("Xoá user?") &&
+  const remove = (uid) => confirm(t("delete_user_confirm")) &&
     authFetch(`${API}/api/users/${uid}/delete`, { method:"POST" }).then(reload);
 
   return (
@@ -635,7 +864,7 @@ function UsersPanel() {
         <input type="password" placeholder="password" value={form.password}
           onChange={e=>setForm({...form, password:e.target.value})}
           style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", width:140 }} />
-        <input placeholder="tên" value={form.name} onChange={e=>setForm({...form, name:e.target.value})}
+        <input placeholder={t("name_hint")} value={form.name} onChange={e=>setForm({...form, name:e.target.value})}
           style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)", width:120 }} />
         <select value={form.role} onChange={e=>setForm({...form, role:e.target.value})}
           style={{ padding:"4px 8px", border:"0.5px solid var(--bdr2)", borderRadius:6, background:"var(--bg)", color:"var(--txt)" }}>
@@ -643,9 +872,10 @@ function UsersPanel() {
           <option value="operator">operator</option>
           <option value="admin">admin</option>
         </select>
-        <Btn onClick={add} color="--ok">+ Tạo user</Btn>
+        <Btn onClick={add} color="--ok">{t("create_user")}</Btn>
       </div>
-      <Tbl cols={["#", "Email", "Tên", "Role", "Tạo", "Last login", ""]}
+      <Tbl cols={["#", t("col_email"), t("col_name"), t("col_role"),
+                  t("col_created"), t("col_last_login"), ""]}
         rows={data.map(u => [
           u.id, <code>{u.email}</code>, u.name||"—",
           <select value={u.role} onChange={e=>setRole(u.id, e.target.value)}
@@ -659,7 +889,7 @@ function UsersPanel() {
           <span style={{ fontSize:11, color:"var(--txt3)" }}>{fmtTs(u.last_login)}</span>,
           <Btn onClick={()=>remove(u.id)} danger>×</Btn>,
         ])}
-        empty="Chưa có user" />
+        empty={t("no_user")} />
     </Card>
   );
 }
@@ -677,34 +907,34 @@ function SettingsPanel() {
 
   const save = async () => {
     const updates = Object.entries(dirty).map(([key, value]) => ({ key, value }));
-    if (updates.length === 0) { setMsg("Không có thay đổi"); return; }
-    setMsg("Đang lưu...");
+    if (updates.length === 0) { setMsg(t("no_change")); return; }
+    setMsg(t("saving"));
     const r = await authFetch(`${API}/api/settings`, {
       method: "POST", body: JSON.stringify({ updates })
     }).then(r=>r.json());
-    if (r.errors?.length) setMsg(`Lưu ${r.updated}, lỗi: ${r.errors.join("; ")}`);
-    else setMsg(`✓ Đã lưu ${r.updated} setting`);
+    if (r.errors?.length) setMsg(t("save_errors", { n: r.updated, e: r.errors.join("; ") }));
+    else setMsg(t("saved_count", { n: r.updated }));
     reload();
   };
 
   const testTelegram = async () => {
-    setMsg("Đang gửi test Telegram...");
+    setMsg(t("sending_telegram"));
     const r = await authFetch(`${API}/api/settings/test/telegram`, { method: "POST" })
       .then(r=>r.json());
     setMsg(r.status === "sent"
-      ? "✓ Đã gửi tin nhắn test — check Telegram"
+      ? t("telegram_sent")
       : `× skipped: token=${r.token_set} chat=${r.chat_id_set}`);
   };
 
   const testEmail = async () => {
-    setMsg("Đang gửi test email...");
+    setMsg(t("sending_email"));
     const r = await authFetch(`${API}/api/settings/test/email`, { method: "POST" })
       .then(r=>r.json()).catch(e => ({ detail: e.message }));
-    setMsg(r.status === "sent" ? "✓ Đã gửi email test" : `× ${r.detail || "fail"}`);
+    setMsg(r.status === "sent" ? t("email_sent") : `× ${r.detail || "fail"}`);
   };
 
   const resetKey = async (key) => {
-    if (!confirm(`Xoá override cho ${key}? Sẽ fallback về ENV/default.`)) return;
+    if (!confirm(t("reset_confirm", { key }))) return;
     await authFetch(`${API}/api/settings/${key}/delete`, { method: "POST" });
     reload();
   };
@@ -720,11 +950,11 @@ function SettingsPanel() {
   };
 
   return (
-    <Card title="Settings — cấu hình runtime (không cần restart)"
+    <Card title={t("settings_title")}
       action={<>
-        <Btn onClick={testTelegram}>📨 Test Telegram</Btn>{" "}
-        <Btn onClick={testEmail}>✉ Test Email</Btn>{" "}
-        <Btn onClick={save} color="--ok">💾 Lưu</Btn>
+        <Btn onClick={testTelegram}>{t("test_telegram")}</Btn>{" "}
+        <Btn onClick={testEmail}>{t("test_email")}</Btn>{" "}
+        <Btn onClick={save} color="--ok">{t("save_btn")}</Btn>
       </>}>
       {msg && <div style={{ padding:8, marginBottom:10, background:"var(--bg)",
                              borderRadius:6, fontSize:12,
@@ -733,9 +963,7 @@ function SettingsPanel() {
         {msg}
       </div>}
       <div style={{ fontSize:11, color:"var(--txt3)", marginBottom:10 }}>
-        Thứ tự ưu tiên: <b>DB</b> (sửa ở đây) → <b>ENV</b> (.env) → <b>default</b>.
-        Server-side dispatcher đọc cache mới trong &lt; 15s. Telegram polling bot (sw-telegram container)
-        vẫn dùng ENV cũ cho đến khi restart container.
+        {t("priority_note")}
       </div>
       {Object.keys(byGroup).sort().map(group => (
         <div key={group} style={{ marginBottom:14 }}>
@@ -824,7 +1052,7 @@ function BackupPanel() {
   };
 
   const remove = async (name) => {
-    if (!confirm(`Xoá ${name}?`)) return;
+    if (!confirm(t("delete_backup_confirm", { name }))) return;
     await authFetch(`${API}/api/backup/${name}/delete`, { method:"POST" });
     reload();
   };
@@ -836,7 +1064,7 @@ function BackupPanel() {
   return (
     <Card title={`Backups (${data.backups?.length||0})`}
       action={<><span style={{ fontSize:11, color:"var(--txt3)", marginRight:10 }}>
-        retention: {data.retention_days}d · {data.schedule_utc}
+        {t("retention")}: {data.retention_days}d · {data.schedule_utc}
       </span>
         <input type="number" min="1" max="365" value={lookback}
           onChange={e=>setLookback(e.target.value)} title="Influx lookback (days)"
@@ -844,19 +1072,20 @@ function BackupPanel() {
                     background:"var(--bg)", color:"var(--txt)", width:60, marginRight:6,
                     fontSize:11 }} />
         <Btn onClick={runNow} color="--ok">
-          {status.running ? "🔄 đang chạy..." : "Backup ngay"}
+          {status.running ? t("backup_running") : t("backup_now")}
         </Btn>
       </>}>
       <div style={{ fontSize:11, color:"var(--txt3)", marginBottom:10 }}>
-        Dir: <code>{data.backup_dir}</code> · Mỗi backup = SQLite + InfluxDB (N-day line protocol) + audit logs, ký HMAC.
+        {t("backup_dir_note", { dir: data.backup_dir })}
         {status.last_error && <div style={{ color:"var(--crit)", marginTop:4 }}>
-          ⚠ Lỗi lần trước: {status.last_error}
+          {t("last_error")} {status.last_error}
         </div>}
         {status.last_result && !status.running && <div style={{ color:"var(--ok)", marginTop:4 }}>
-          ✓ Lần gần nhất: {status.last_result.name} ({(status.last_result.bytes/1024/1024).toFixed(1)} MB)
+          {t("last_success")} {status.last_result.name} ({(status.last_result.bytes/1024/1024).toFixed(1)} MB)
         </div>}
       </div>
-      <Tbl cols={["File", "Khi", "Size", "SQLite rows", "Influx pts", "Audit", "Actions"]}
+      <Tbl cols={[t("col_file"), t("col_when"), t("col_size"), t("col_sqlite_rows"),
+                  "Influx pts", t("col_audit"), t("col_actions")]}
         rows={(data.backups||[]).map(b => {
           const v = verifyResult[b.name];
           const rows = b.summary?.sqlite_rows || {};
@@ -887,7 +1116,7 @@ function BackupPanel() {
             </span>,
           ];
         })}
-        empty="Chưa có backup — click 'Backup ngay' hoặc đợi cron UTC 19:00" />
+        empty={t("no_backup")} />
     </Card>
   );
 }
@@ -916,7 +1145,7 @@ function OpsTab({ hosts }) {
           }}>{label}</button>
         ))}
       </div>
-      <ErrorBoundary key={sub} fallback={`Panel ${sub} bị lỗi runtime`}>
+      <ErrorBoundary key={sub} fallback={t("panel_runtime_error", { n: sub })}>
         {sub === "states"   && <StatesPanel />}
         {sub === "silences" && <SilencesPanel />}
         {sub === "monitors" && <MonitorsPanel />}
@@ -1013,7 +1242,7 @@ function App({ user, onLogout }) {
                     borderBottom: "0.5px solid var(--bdr)", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontWeight: 500, fontSize: 15 }}>ServerWatch</span>
-          <Badge text={connected ? `${Object.keys(metrics).length} online` : "Đang kết nối..."} color={connected ? "--ok" : "--warn"} />
+          <Badge text={connected ? `${Object.keys(metrics).length} ${t("online")}` : t("connecting")} color={connected ? "--ok" : "--warn"} />
           {summary.critical_hosts > 0 && <Badge text={`${summary.critical_hosts} critical`} color="--crit" />}
           {summary.warning_hosts  > 0 && <Badge text={`${summary.warning_hosts} warning`}  color="--warn" />}
         </div>
@@ -1024,7 +1253,7 @@ function App({ user, onLogout }) {
                        background: activeTab === tab ? "var(--bg3)" : "transparent",
                        fontWeight: activeTab === tab ? 500 : 400,
                        color: activeTab === tab ? "var(--txt)" : "var(--txt2)" }}>
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {t("tab_" + tab)}
               {tab === "alerts" && alerts.filter(a=>a.severity==="critical").length > 0 &&
                 <span style={{ marginLeft: 4, fontSize: 10, color: "var(--crit)" }}>
                   {alerts.filter(a=>a.severity==="critical").length}
@@ -1038,12 +1267,13 @@ function App({ user, onLogout }) {
           ))}
           <div style={{ marginLeft:12, display:"flex", alignItems:"center", gap:8,
                         borderLeft:"0.5px solid var(--bdr)", paddingLeft:12 }}>
+            <LangSwitch />
             <span style={{ fontSize:11, color:"var(--txt2)" }}>{user?.email}</span>
             <button onClick={onLogout}
               style={{ padding:"3px 10px", borderRadius:6,
                        border:"0.5px solid var(--bdr2)", background:"transparent",
                        color:"var(--txt2)", fontSize:11 }}>
-              Đăng xuất
+              {t("logout")}
             </button>
           </div>
         </div>
@@ -1057,7 +1287,7 @@ function App({ user, onLogout }) {
                       overflowY: "auto", flexShrink: 0 }}>
           <div style={{ fontSize: 11, fontWeight: 500, color: "var(--txt3)",
                         padding: "0 8px 8px", letterSpacing: .5 }}>
-            MÁY CHỦ ({hosts.length})
+            {t("servers")} ({hosts.length})
           </div>
           {hosts.map(h => {
             const hm   = metrics[h.hostname];
@@ -1107,16 +1337,16 @@ function App({ user, onLogout }) {
 
                   {/* Metric cards */}
                   <div style={{ display:"grid", gridTemplateColumns:"repeat(4,minmax(0,1fr))", gap:10, marginBottom:14 }}>
-                    <MetricCard label="CPU" value={`${m.cpu.percent.toFixed(0)}%`}
-                      sub={`${m.cpu.count} cores`}
+                    <MetricCard label={t("cpu")} value={`${m.cpu.percent.toFixed(0)}%`}
+                      sub={`${m.cpu.count} ${t("cores")}`}
                       pct={m.cpu.percent}
                       color={m.cpu.percent>90?"--crit":m.cpu.percent>70?"--warn":null} />
-                    <MetricCard label="RAM" value={`${m.memory.percent.toFixed(0)}%`}
+                    <MetricCard label={t("ram")} value={`${m.memory.percent.toFixed(0)}%`}
                       sub={`${m.memory.used_gb} / ${m.memory.total_gb} GB`}
                       pct={m.memory.percent}
                       color={m.memory.percent>90?"--crit":m.memory.percent>75?"--warn":null} />
-                    <MetricCard label="Network ↓" value={`${m.network.bytes_recv_mb.toFixed(1)} MB/s`}
-                      sub={`${m.network.connections} kết nối`} />
+                    <MetricCard label={t("network_down")} value={`${m.network.bytes_recv_mb.toFixed(1)} MB/s`}
+                      sub={`${m.network.connections} ${t("connections")}`} />
                     {(() => {
                       // Chọn partition đầy nhất để hiển thị card chính, kèm GB
                       // sub-line. Nếu có nhiều partitions, render danh sách bên dưới.
@@ -1132,7 +1362,7 @@ function App({ user, onLogout }) {
                           + ` · ${main.mountpoint}`
                         : "";
                       return (
-                        <MetricCard label="Disk"
+                        <MetricCard label={t("disk")}
                           value={`${pct?.toFixed(0) ?? "?"}%`}
                           sub={sub}
                           pct={pct}
@@ -1144,8 +1374,8 @@ function App({ user, onLogout }) {
                   {/* Sparklines */}
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
                     {[
-                      { label:"CPU (lịch sử)", key:"cpu",  color:"--purple" },
-                      { label:"Network ↓",     key:"net",  color:"--info"   },
+                      { label: t("cpu_history"), key:"cpu",  color:"--purple" },
+                      { label: t("network_down"), key:"net",  color:"--info"   },
                     ].map(({ label, key, color }) => (
                       <div key={key} style={{ background:"var(--bg2)", border:"0.5px solid var(--bdr)",
                                               borderRadius:"var(--rl)", padding:12 }}>
@@ -1159,7 +1389,7 @@ function App({ user, onLogout }) {
                   <div style={{ background:"var(--bg2)", border:"0.5px solid var(--bdr)",
                                 borderRadius:"var(--rl)", padding:12, marginBottom:14 }}>
                     <div style={{ fontSize:12, fontWeight:500, color:"var(--txt2)", marginBottom:10 }}>
-                      Top process
+                      {t("top_process")}
                     </div>
                     <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
                       <thead>
@@ -1195,10 +1425,10 @@ function App({ user, onLogout }) {
                                   borderRadius:"var(--rl)", padding:12 }}>
                       <div style={{ fontSize:12, fontWeight:500, marginBottom:8,
                                     color: m.security.brute_force?"var(--crit)":"var(--txt2)" }}>
-                        {m.security.brute_force ? "⚠ Brute force phát hiện" : "Bảo mật"}
+                        {m.security.brute_force ? t("brute_force_detected") : t("security")}
                       </div>
                       <div style={{ color:"var(--txt2)" }}>
-                        Login thất bại / 60s: <b style={{ color: m.security.recent_fails_60s>5?"var(--crit)":"inherit" }}>
+                        {t("failed_logins_60s")} <b style={{ color: m.security.recent_fails_60s>5?"var(--crit)":"inherit" }}>
                           {m.security.recent_fails_60s}
                         </b>
                       </div>
@@ -1215,7 +1445,7 @@ function App({ user, onLogout }) {
               ) : (
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
                               height:"50vh", color:"var(--txt3)" }}>
-                  {connected ? "Chọn máy chủ từ thanh bên" : "Đang kết nối WebSocket..."}
+                  {connected ? t("select_server") : t("connecting_ws")}
                 </div>
               )}
             </>
@@ -1258,7 +1488,7 @@ function App({ user, onLogout }) {
                 ))}
                 {alerts.length === 0 && (
                   <div style={{ textAlign:"center", color:"var(--txt3)", padding:40 }}>
-                    Chưa có cảnh báo nào
+                    {t("no_alerts")}
                   </div>
                 )}
               </div>
