@@ -66,7 +66,20 @@ log = logging.getLogger("server")
 SECRET_TOKEN     = os.getenv("SECRET_TOKEN", "changeme")
 ADMIN_EMAIL      = os.getenv("ADMIN_EMAIL", "admin@serverwatch.local")
 ADMIN_PASSWORD   = os.getenv("ADMIN_PASSWORD", "changeme")
-JWT_SECRET       = os.getenv("JWT_SECRET", "") or SECRET_TOKEN
+
+# JWT_SECRET và BACKUP_HMAC_SECRET phải khác SECRET_TOKEN — nếu admin để trống,
+# server tự sinh random (in-memory, mất khi restart → JWT cũ bị invalidate, an toàn).
+# Trước đây cùng default = SECRET_TOKEN → 1 leak agent token = forge JWT + forge
+# backup HMAC + bypass admin auth qua Bearer. Tách ra giảm blast radius.
+def _resolve_secret(env_var: str, fallback: str) -> tuple[str, bool]:
+    val = os.getenv(env_var, "")
+    if val and val != SECRET_TOKEN:
+        return val, False
+    # Sinh random ephemeral nếu env không set HOẶC trùng SECRET_TOKEN
+    return secrets.token_urlsafe(48), True
+
+JWT_SECRET, _jwt_generated = _resolve_secret("JWT_SECRET", SECRET_TOKEN)
+BACKUP_HMAC_SECRET, _backup_generated = _resolve_secret("BACKUP_HMAC_SECRET", SECRET_TOKEN)
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
 
 ALERT_RENOTIFY_SEC     = int(os.getenv("ALERT_RENOTIFY_SEC", "3600"))
@@ -125,7 +138,11 @@ def _b64url_decode(s: str) -> bytes:
 def create_jwt(payload: dict, secret: str = JWT_SECRET,
                 expire_hours: int = JWT_EXPIRE_HOURS) -> str:
     header = {"alg": "HS256", "typ": "JWT"}
-    payload = {**payload, "exp": int(time.time()) + expire_hours * 3600}
+    # Thêm jti (JWT ID) ngẫu nhiên để hỗ trợ blacklist khi logout — cần unique
+    # per-token để 1 lần logout không invalidate token khác của cùng user.
+    payload = {**payload,
+               "exp": int(time.time()) + expire_hours * 3600,
+               "jti": secrets.token_urlsafe(16)}
     h = _b64url_encode(json.dumps(header).encode())
     p = _b64url_encode(json.dumps(payload).encode())
     sig = hmac.new(secret.encode(), f"{h}.{p}".encode(), hashlib.sha256).digest()
@@ -322,12 +339,19 @@ class AlertDispatcher:
         if not token or not chat_id:
             return
         emoji = "🔴" if alert["severity"] == "critical" else "🟡"
+        # Escape Markdown special chars trong field user-controlled (host, type,
+        # detail có thể đến từ agent gửi giả mạo). parse_mode=Markdown sẽ render
+        # [text](url) thành clickable link → phishing/javascript: URL risk.
+        # Bọc trong code-block (`…`) là cách đơn giản nhất, an toàn vì code-block
+        # không parse Markdown bên trong (chỉ cần escape ` và \\).
+        def _md_code(s: str) -> str:
+            return str(s).replace("\\", "\\\\").replace("`", "'")
         text = (
             f"{emoji} *ServerWatch Alert*\n"
-            f"*Host:* `{host}`\n"
-            f"*Loại:* `{alert['type']}`\n"
+            f"*Host:* `{_md_code(host)}`\n"
+            f"*Loại:* `{_md_code(alert['type'])}`\n"
             f"*Mức:* `{alert['severity'].upper()}`\n"
-            f"*Chi tiết:* {alert['detail']}\n"
+            f"*Chi tiết:* `{_md_code(alert['detail'])}`\n"
             f"*Thời gian:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
         url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -580,7 +604,7 @@ async def _task_backup_loop():
                         None,
                         lambda: backup_mod.run_backup(
                             DB_PATH, _data_dir, BACKUP_DIR,
-                            hmac_key=JWT_SECRET,
+                            hmac_key=BACKUP_HMAC_SECRET,
                         )
                     )
                     log.info("Backup OK: %s (%d bytes)", result["name"], result["bytes"])
@@ -602,7 +626,7 @@ async def _task_backup_loop():
                     try:
                         loop = asyncio.get_event_loop()
                         v = await loop.run_in_executor(
-                            None, lambda: backup_mod.verify_backup(latest, JWT_SECRET)
+                            None, lambda: backup_mod.verify_backup(latest, BACKUP_HMAC_SECRET)
                         )
                         if not v["ok"]:
                             await dispatcher.dispatch("backup", {
@@ -624,6 +648,17 @@ async def _task_backup_loop():
 async def lifespan(app: FastAPI):
     init_db()
     log.info("ServerWatch Server khởi động (lean)")
+    # Cảnh báo nếu admin chưa set JWT_SECRET / BACKUP_HMAC_SECRET — server sẽ
+    # dùng giá trị ephemeral (mất khi restart → user phải login lại).
+    if _jwt_generated:
+        log.warning("JWT_SECRET chưa set (hoặc trùng SECRET_TOKEN) — dùng "
+                    "random ephemeral. User sẽ phải login lại sau mỗi lần "
+                    "restart. Khuyến nghị set JWT_SECRET trong .env "
+                    "(openssl rand -hex 32).")
+    if _backup_generated:
+        log.warning("BACKUP_HMAC_SECRET chưa set — backup mới sẽ ký bằng "
+                    "ephemeral key, KHÔNG verify được sau khi restart. "
+                    "Khuyến nghị set BACKUP_HMAC_SECRET trong .env.")
 
     tasks = [
         asyncio.create_task(_task_auto_resolve_loop()),
@@ -664,9 +699,17 @@ async def security_headers(request: Request, call_next):
     response.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; "
+        # Dashboard dùng React + Babel JSX in-browser nên cần 'unsafe-inline'
+        # (inline <script type="text/babel">) và 'unsafe-eval' (Babel transform).
+        # Trade-off: tightening CSP đòi rewrite dashboard thành bundle pre-build.
+        # 'object-src none' chặn legacy plugin (Flash/PDF embed).
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; "
         "style-src 'self' 'unsafe-inline'; "
-        "connect-src 'self' wss: ws:;"
+        "img-src 'self' data:; "
+        "connect-src 'self' wss: ws:; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'self';"
     )
     response.headers.setdefault("Strict-Transport-Security",
                                  "max-age=31536000; includeSubDomains")
@@ -686,7 +729,13 @@ LOGIN_WINDOW_SEC   = 300
 def verify_agent_token(authorization: str) -> bool:
     if not authorization or not authorization.startswith("Bearer "):
         return False
-    return authorization.split(" ", 1)[1] == SECRET_TOKEN
+    # constant-time compare để chặn timing attack — kể cả với HTTPS+CDN, `==`
+    # vẫn là code smell vì exploit qua local network (cùng datacenter) khả thi.
+    return hmac.compare_digest(authorization.split(" ", 1)[1], SECRET_TOKEN)
+
+# In-memory JWT blacklist — JTI của token bị logout. Reset khi server restart
+# (chấp nhận được vì JWT cũ cũng invalidated khi JWT_SECRET tái sinh random).
+_jwt_blacklist: set[str] = set()
 
 def verify_dashboard_token(request: Request) -> Optional[dict]:
     token = request.cookies.get("sw_token", "")
@@ -696,7 +745,10 @@ def verify_dashboard_token(request: Request) -> Optional[dict]:
             token = auth.split(" ", 1)[1]
     if not token:
         return None
-    return verify_jwt(token)
+    payload = verify_jwt(token)
+    if payload and payload.get("jti") in _jwt_blacklist:
+        return None
+    return payload
 
 def require_login(request: Request) -> dict:
     user = verify_dashboard_token(request)
@@ -705,9 +757,10 @@ def require_login(request: Request) -> dict:
     return user
 
 def require_admin(request: Request) -> dict:
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer ") and auth.split(" ", 1)[1] == SECRET_TOKEN:
-        return {"email": "machine", "role": "admin", "uid": 0}
+    # KHÔNG nhận Bearer SECRET_TOKEN nữa — agent token (chia sẻ với mọi host
+    # cần monitor) trước đây trùng admin token là vấn đề bảo mật lớn: 1 host
+    # bị compromise → attacker có toàn quyền admin trên dashboard/backup/users.
+    # Admin chỉ qua JWT (login với email/password).
     user = verify_dashboard_token(request)
     if not user:
         raise HTTPException(status_code=401, detail="Chưa đăng nhập")
@@ -769,7 +822,19 @@ async def login(request: Request):
 
 
 @app.post("/api/auth/logout")
-async def logout():
+async def logout(request: Request):
+    # Revoke JWT thật sự (thêm vào blacklist) — trước đây chỉ xoá cookie nên
+    # nếu attacker đã capture được JWT trước đó, vẫn dùng được 24h sau logout.
+    token = request.cookies.get("sw_token", "") or (
+        request.headers.get("Authorization", "")[7:]
+        if request.headers.get("Authorization", "").startswith("Bearer ") else "")
+    if token:
+        payload = verify_jwt(token)
+        if payload and payload.get("jti"):
+            _jwt_blacklist.add(payload["jti"])
+            # Cap blacklist size để tránh memory bloat (server restart auto-clear)
+            if len(_jwt_blacklist) > 10_000:
+                _jwt_blacklist.clear()
     response = JSONResponse(content={"status": "ok"})
     response.delete_cookie("sw_token")
     return response
@@ -816,7 +881,8 @@ async def change_password(request: Request):
 @app.post("/api/metrics")
 async def receive_metrics(request: Request):
     auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer ") or auth.split(" ", 1)[1] != SECRET_TOKEN:
+    if not auth.startswith("Bearer ") or not hmac.compare_digest(
+            auth.split(" ", 1)[1], SECRET_TOKEN):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     body = await request.json()
@@ -1337,7 +1403,7 @@ async def _run_backup_bg(by_user: str):
         result = await loop.run_in_executor(
             None,
             lambda: backup_mod.run_backup(
-                DB_PATH, _data_dir, BACKUP_DIR, hmac_key=JWT_SECRET,
+                DB_PATH, _data_dir, BACKUP_DIR, hmac_key=BACKUP_HMAC_SECRET,
             )
         )
         _backup_state["last_result"] = {
@@ -1377,7 +1443,7 @@ async def api_backup_verify(name: str, request: Request):
         raise HTTPException(status_code=404, detail="Backup không tồn tại")
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
-        None, lambda: backup_mod.verify_backup(path, JWT_SECRET)
+        None, lambda: backup_mod.verify_backup(path, BACKUP_HMAC_SECRET)
     )
 
 
@@ -1408,7 +1474,9 @@ async def api_backup_download(name: str, request: Request):
 
 @app.get("/api/heartbeat")
 async def api_heartbeat(secret: str = ""):
-    if HEARTBEAT_SECRET and secret != HEARTBEAT_SECRET:
+    # Bắt buộc HEARTBEAT_SECRET phải được cấu hình — trước đây nếu để trống,
+    # bất kỳ ai cũng query được fresh_hosts + firing_alerts (reconnaissance).
+    if not HEARTBEAT_SECRET or not hmac.compare_digest(secret, HEARTBEAT_SECRET):
         raise HTTPException(status_code=403, detail="Bad secret")
     now = datetime.now(timezone.utc)
     checks = {}

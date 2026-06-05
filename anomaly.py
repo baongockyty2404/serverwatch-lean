@@ -91,11 +91,16 @@ class HostProfile:
         self.docker_learning_count: int = 0
 
     def update(self, metrics: dict):
-        self.cpu.push(metrics["cpu"]["percent"])
-        self.memory.push(metrics["memory"]["percent"])
-        self.net_recv.push(metrics["network"]["bytes_recv_mb"])
-        self.net_sent.push(metrics["network"]["bytes_sent_mb"])
-        self.connections.push(metrics["network"]["connections"])
+        # .get() defensively — partial payload (kể cả agent version cũ) không
+        # crash baseline update; 0.0 là giá trị an toàn cho missing metric.
+        cpu  = (metrics.get("cpu")     or {}).get("percent", 0.0) or 0.0
+        mem  = (metrics.get("memory")  or {}).get("percent", 0.0) or 0.0
+        net  = metrics.get("network")  or {}
+        self.cpu.push(cpu)
+        self.memory.push(mem)
+        self.net_recv.push(net.get("bytes_recv_mb", 0.0) or 0.0)
+        self.net_sent.push(net.get("bytes_sent_mb", 0.0) or 0.0)
+        self.connections.push(net.get("connections", 0) or 0)
 
         # Học whitelist process sau 100 lần thu thập đầu
         if self.process_count < 100:
