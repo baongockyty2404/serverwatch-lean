@@ -18,6 +18,7 @@ topology, FIM endpoint.
 """
 
 import os
+import re
 import json
 import time
 import hmac
@@ -31,7 +32,7 @@ import base64
 from datetime import datetime, timezone, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from collections import defaultdict
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -258,12 +259,32 @@ class RuleEngine:
             return True
         return False
 
+    # Giới hạn threats array từ 1 agent — chặn compromised agent spam fake
+    # alerts. Agent thực tế chạy LocalThreatDetector chỉ trả 1-5 threat/lần.
+    MAX_AGENT_THREATS = 10
+    ALLOWED_THREAT_SEVERITY = {"info", "warning", "critical"}
+
     def evaluate(self, host: str, metrics: dict) -> list:
         alerts = []
 
-        for t in metrics.get("threats", []):
-            if self._should_alert(host, t["type"]):
-                alerts.append(t)
+        agent_threats = metrics.get("threats") or []
+        if not isinstance(agent_threats, list):
+            agent_threats = []
+        for t in agent_threats[:self.MAX_AGENT_THREATS]:
+            # Validate threat shape — agent compromise có thể craft severity
+            # bừa bãi để dispatch email/telegram. Drop nếu shape không khớp.
+            if not isinstance(t, dict):
+                continue
+            ttype = t.get("type")
+            sev   = t.get("severity")
+            if not isinstance(ttype, str) or not ttype:
+                continue
+            if sev not in self.ALLOWED_THREAT_SEVERITY:
+                continue
+            # Truncate detail field — chặn email spam với 1MB text
+            detail = str(t.get("detail", ""))[:500]
+            if self._should_alert(host, ttype):
+                alerts.append({"type": ttype, "severity": sev, "detail": detail})
 
         if metrics.get("cpu", {}).get("percent", 0) > 90:
             if self._should_alert(host, "cpu_high"):
@@ -726,6 +747,29 @@ _login_attempts: dict = defaultdict(list)
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_WINDOW_SEC   = 300
 
+# Hostname format — chấp nhận chữ/số + . _ -, max 64 ký tự (giống RFC 952/1123
+# kèm Docker container name pattern). Đủ rộng cho FQDN bình thường, đủ chặt
+# để chặn ký tự control + payload injection.
+_HOSTNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+# Anti-DoS: cap số host MỚI đăng ký / phút (toàn server, không per-token vì
+# token chia sẻ giữa các agent). Pentest cho thấy 100 host rác / 5 giây khả thi.
+_new_host_window: deque = deque(maxlen=200)
+NEW_HOST_RATE_LIMIT = 10  # tối đa 10 host mới / 60s
+
+def _enforce_new_host_rate_limit(host: str):
+    now = time.time()
+    # Xoá entries cũ
+    while _new_host_window and now - _new_host_window[0] > 60:
+        _new_host_window.popleft()
+    if len(_new_host_window) >= NEW_HOST_RATE_LIMIT:
+        log.warning("New-host rate limit reached (host=%s) — possible storage DoS", host)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Quá nhiều host mới trong 60s (limit={NEW_HOST_RATE_LIMIT}). "
+                   "Nếu deploy nhiều host cùng lúc, đợi 1 phút.")
+    _new_host_window.append(now)
+
 def verify_agent_token(authorization: str) -> bool:
     if not authorization or not authorization.startswith("Bearer "):
         return False
@@ -795,6 +839,11 @@ async def login(request: Request):
     if not row:
         conn.close()
         _login_attempts[client_ip].append(now)
+        # Chạy dummy PBKDF2 để timing khớp với trường hợp user có thật. Trước
+        # đây user không tồn tại trả 401 sau ~10ms (chỉ DB lookup), user có
+        # thật ~100ms (PBKDF2 100k iter) → user enumeration via timing.
+        hashlib.pbkdf2_hmac("sha256", password.encode(),
+                            b"00000000000000000000000000000000", 100_000)
         raise HTTPException(status_code=401, detail="Email hoặc mật khẩu không đúng")
 
     uid, db_email, pw_hash, salt, name, role = row
@@ -894,8 +943,19 @@ async def receive_metrics(request: Request):
     # nhưng vẫn để lại row trong table hosts.
     if not isinstance(host, str) or not host or host == "unknown":
         raise HTTPException(status_code=422, detail="missing or invalid 'host'")
+    # Hostname charset/length — chặn compromised agent spawn "ddos-fake-N"
+    # với 1MB hostname hoặc nhiễu DB với ký tự lạ.
+    if len(host) > 64 or not _HOSTNAME_RE.match(host):
+        raise HTTPException(status_code=422,
+                            detail="hostname phải 1-64 ký tự [A-Za-z0-9._-]")
     if not isinstance(metrics, dict) or not metrics:
         raise HTTPException(status_code=422, detail="missing or empty 'metrics'")
+
+    # Rate-limit số HOST MỚI mỗi phút từ cùng 1 token — chặn storage DoS
+    # (test pentest: 100 host rác trong vài giây). Host đã tồn tại không
+    # tính. Cap ở 5 host mới / phút / token.
+    if host not in latest_metrics:
+        _enforce_new_host_rate_limit(host)
 
     payload_copy = {k: v for k, v in body.items() if k != "checksum"}
     expected_cs = hashlib.sha256(
@@ -976,6 +1036,8 @@ async def get_latest_metrics(host: str, request: Request):
 
 @app.get("/api/metrics/{host}/series")
 async def get_metrics_series(host: str, request: Request, hours: int = 24):
+    # Cap hours để tránh truy vấn vô lý (hours=99999 ăn nguyên ring-buffer).
+    hours = max(1, min(hours, 168))  # 1h ÷ 7 ngày
     """Trả về time-series CPU/MEM/Disk cho dashboard chart."""
     require_login(request)
     hours = max(1, min(hours, METRICS_RETENTION_HOURS))
@@ -985,6 +1047,7 @@ async def get_metrics_series(host: str, request: Request, hours: int = 24):
 
 @app.get("/api/forecast/{host}")
 async def get_forecast(host: str, request: Request, hours: int = 24):
+    hours = max(1, min(hours, 168))
     """
     Linear regression trên metrics_ts để dự đoán khi nào disk/memory chạm ngưỡng.
     Không tốn collector mới — chỉ tính từ data đã có sẵn.
@@ -1047,6 +1110,9 @@ async def get_forecast(host: str, request: Request, hours: int = 24):
 async def get_alerts(request: Request, host: Optional[str] = None,
                      severity: Optional[str] = None, limit: int = 100):
     require_login(request)
+    # Cap limit để chặn dump cả bảng alerts (pentest test: limit=99999999999
+    # returned tens of thousands of rows).
+    limit = max(1, min(limit, 1000))
     conn = sqlite3.connect(DB_PATH)
     query = "SELECT id, host, type, severity, detail, timestamp FROM alerts WHERE 1=1"
     params = []
@@ -1525,11 +1591,20 @@ async def api_logs_ingest_compat():
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    token = ws.query_params.get("token", "")
+    # Ưu tiên cookie (đã set khi login, HttpOnly + Secure + SameSite). Token
+    # qua query string là legacy — không an toàn (log vào nginx access_log,
+    # browser history, Referer). Giữ làm fallback cho client cũ nhưng warn.
+    token = ws.cookies.get("sw_token", "") or ws.query_params.get("token", "")
     user = verify_jwt(token) if token else None
+    # Check blacklist — logout phải invalidate WS session.
+    if user and user.get("jti") in _jwt_blacklist:
+        user = None
     if not user:
         await ws.close(code=4001, reason="Unauthorized")
         return
+    if ws.query_params.get("token"):
+        log.warning("WS auth via query token (deprecated, dùng cookie thay): "
+                    "user=%s", user.get("email"))
     await ws_manager.connect(ws)
     await ws.send_json({"type": "snapshot", "data": latest_metrics})
     try:

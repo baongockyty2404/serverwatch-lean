@@ -19,6 +19,7 @@ Alert khi:
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import socket
 import sqlite3
@@ -27,8 +28,77 @@ import time
 import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+from urllib.parse import urlparse
 
 import aiohttp
+
+
+# SSRF guardrail — chặn admin tạo monitor trỏ vào internal/loopback/metadata IPs.
+# Synthetic monitors chạy trong sw-server container nên có thể probe sang
+# container khác cùng Docker network, host gateway, cloud metadata (169.254.169.254).
+# Trước khi fix: 1 admin compromise → đầy đủ SSRF capability (DNS probe, port scan,
+# limited info leak qua latency + error message). Block ở cả CRUD + probe runtime.
+_BLOCKED_HOSTNAMES = {
+    # Loopback aliases
+    "localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback",
+    # Cloud metadata endpoints
+    "metadata.google.internal", "metadata", "metadata.azure.com",
+    # Docker DNS shortcuts
+    "host.docker.internal", "gateway.docker.internal",
+    "docker.for.mac.localhost", "docker.for.win.localhost",
+}
+
+def _is_blocked_target(target: str) -> tuple[bool, str]:
+    """
+    Trả về (blocked, reason). Áp dụng cho host của cert/tcp và URL của http.
+    Block private (RFC1918), loopback, link-local (incl AWS metadata 169.254.169.254),
+    multicast, reserved, và list hostnames đặc biệt.
+    """
+    if not target:
+        return True, "empty target"
+
+    # Trích host từ URL nếu có scheme
+    host = target.strip()
+    if "://" in host:
+        try:
+            parsed = urlparse(host)
+            host = (parsed.hostname or "").strip()
+        except Exception:
+            return True, "invalid URL"
+
+    if not host:
+        return True, "empty host"
+
+    if host.lower() in _BLOCKED_HOSTNAMES:
+        return True, f"hostname '{host}' blocked"
+
+    # Try parse như IP literal
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_loopback:    return True, f"{ip} is loopback"
+        if ip.is_private:     return True, f"{ip} is private (RFC1918)"
+        if ip.is_link_local:  return True, f"{ip} is link-local (incl cloud metadata)"
+        if ip.is_multicast:   return True, f"{ip} is multicast"
+        if ip.is_reserved:    return True, f"{ip} is reserved"
+        if ip.is_unspecified: return True, f"{ip} is unspecified (0.0.0.0)"
+    except ValueError:
+        # Không phải IP literal — là hostname. Kiểm tra qua DNS resolve.
+        try:
+            infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+        except socket.gaierror:
+            # DNS không resolve được → cho qua (probe sẽ tự fail). Không nên
+            # block ở đây vì có thể chỉ là transient DNS issue.
+            return False, ""
+        for info in infos:
+            try:
+                ip = ipaddress.ip_address(info[4][0])
+            except ValueError:
+                continue
+            if ip.is_loopback or ip.is_private or ip.is_link_local \
+                    or ip.is_multicast or ip.is_reserved:
+                return True, f"hostname '{host}' resolves to internal IP {ip}"
+
+    return False, ""
 
 
 SCHEMA_SQL = """
@@ -380,6 +450,13 @@ def add_monitor(db_path: str, kind: str, target: str,
                 interval_sec: int = 3600) -> int:
     if kind not in ("cert", "domain", "http", "tcp"):
         raise ValueError(f"kind không hợp lệ: {kind}")
+    # SSRF block: cert/tcp/http probe sẽ chạy từ trong sw-server container và
+    # có thể với tới internal services. domain (RDAP/WHOIS) đi qua URL cố định
+    # nên không cần check target.
+    if kind in ("cert", "tcp", "http"):
+        blocked, reason = _is_blocked_target(target)
+        if blocked:
+            raise ValueError(f"target bị chặn (SSRF guard): {reason}")
     conn = sqlite3.connect(db_path)
     cur = conn.execute(
         """INSERT INTO monitors (kind, target, params, interval_sec, enabled, created_at)
