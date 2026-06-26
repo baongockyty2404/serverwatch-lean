@@ -41,6 +41,7 @@ import aiohttp
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -699,6 +700,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ServerWatch API", version="2.0.0-lean", lifespan=lifespan)
 
+# Vendor JS (React/ReactDOM/Babel) self-host cùng origin thay vì unpkg.com —
+# nhiều mạng VN không vào được unpkg → dashboard trắng trang. Mount nếu thư mục tồn tại.
+_VENDOR_DIR = Path(__file__).parent / "vendor"
+if _VENDOR_DIR.is_dir():
+    app.mount("/vendor", StaticFiles(directory=str(_VENDOR_DIR)), name="vendor")
+
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "https://monitor.example.com").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -724,7 +731,8 @@ async def security_headers(request: Request, call_next):
         # (inline <script type="text/babel">) và 'unsafe-eval' (Babel transform).
         # Trade-off: tightening CSP đòi rewrite dashboard thành bundle pre-build.
         # 'object-src none' chặn legacy plugin (Flash/PDF embed).
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; "
+        # React/Babel self-host tại /vendor (cùng origin) → không cần whitelist unpkg.
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "connect-src 'self' wss: ws:; "

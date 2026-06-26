@@ -23,6 +23,7 @@ FROM base AS server
 COPY server.py anomaly.py dashboard.html \
      alert_state.py monitors.py metrics_ts.py \
      backup.py settings.py ./
+COPY vendor ./vendor
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -sf http://localhost:8000/health || exit 1

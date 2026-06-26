@@ -22,6 +22,7 @@ services:
       - ./data:/app/data
       - ./backup:/app/backup
       - ./dashboard.html:/app/dashboard.html:ro
+      - ./vendor:/app/vendor:ro
     environment:
       SECRET_TOKEN: ${SECRET_TOKEN:-changeme}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@serverwatch.local}
